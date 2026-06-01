@@ -5,11 +5,13 @@ import {
   DAYS,
 } from '../data';
 import { Icon } from '../components/Icon';
-import type { Config, Worker } from '../types';
+import type { Config, SolverConfig, Worker } from '../types';
 
 interface Props {
   config: Config;
   setConfig: React.Dispatch<React.SetStateAction<Config>>;
+  solverConfig: SolverConfig;
+  setSolverConfig: React.Dispatch<React.SetStateAction<SolverConfig>>;
   workers: Worker[];
   setWorkers: React.Dispatch<React.SetStateAction<Worker[]>>;
   dark: boolean;
@@ -183,7 +185,9 @@ function ConfirmModal({ title, body, confirmLabel, onConfirm, onClose, dark }: {
   );
 }
 
-export function ConfiguracionView({ config, setConfig, workers, setWorkers, dark }: Props) {
+export function ConfiguracionView({ config, setConfig, solverConfig, setSolverConfig, workers, setWorkers, dark }: Props) {
+  const setSolver = <K extends keyof SolverConfig>(k: K, v: SolverConfig[K]) =>
+    setSolverConfig((s) => ({ ...s, [k]: v }));
   const [catModal, setCatModal] = useState<{ cat?: Config['categories'][number] } | null>(null);
   const [shiftModal, setShiftModal] = useState<{ shift?: Config['shiftTypes'][number] } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'cat' | 'shift'; item: Config['categories'][number] | Config['shiftTypes'][number]; n: number } | null>(null);
@@ -253,7 +257,7 @@ export function ConfiguracionView({ config, setConfig, workers, setWorkers, dark
     <div className="view-pad">
       <div style={{ marginBottom: 22 }}>
         <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Configuración</h1>
-        <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>Definí los puestos, las franjas horarias y la cobertura mínima del sistema.</p>
+        <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>Definí los puestos, franjas horarias, cobertura y las reglas del motor de optimización.</p>
       </div>
 
       <div className="config-cols">
@@ -355,6 +359,101 @@ export function ConfiguracionView({ config, setConfig, workers, setWorkers, dark
           <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 14, padding: '12px 14px', borderRadius: 10, background: surface2, border: `1px solid ${border}`, fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
             <Icon name="clock" size={14} style={{ flexShrink: 0, marginTop: 1, color: text3 }} />
             <span>La cobertura mínima marca cuántas personas debe haber en cada franja por día. Los huecos se muestran en <b>Turnos</b> y <b>Estadísticas</b>.</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Solver Config */}
+      <div style={{ ...panel, marginTop: 14 }}>
+        <div style={{ ...panelHead, marginBottom: 20 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Icon name="magic" size={15} style={{ verticalAlign: '-2px' }} /> Motor de optimización
+            </h3>
+            <p style={{ margin: '5px 0 0', fontSize: 12.5, color: text3, lineHeight: 1.5 }}>
+              Estas reglas definen qué puede y qué no puede hacer el algoritmo al generar el cuadro de turnos.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+          {/* Hard constraints */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: text3, textTransform: 'uppercase', letterSpacing: '0.06em', paddingBottom: 8, borderBottom: `1px solid ${border}` }}>
+              Reglas obligatorias
+            </div>
+
+            {/* Numeric: min_rest_hours */}
+            {[
+              { key: 'min_rest_hours' as const, label: 'Descanso mínimo entre turnos', unit: 'horas', min: 8, max: 24 },
+              { key: 'max_consecutive_days' as const, label: 'Días máximos continuos', unit: 'días', min: 1, max: 7 },
+              { key: 'max_weekly_hours' as const, label: 'Límite de horas semanales', unit: 'horas', min: 20, max: 80 },
+            ].map(({ key, label, unit, min, max }) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', border: `1px solid ${border}`, borderRadius: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+                  <div style={{ fontSize: 11.5, color: text3, marginTop: 2 }}>mín. {min} · máx. {max}</div>
+                </div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: surface2, border: `1px solid ${border}`, borderRadius: 8, padding: 2, flexShrink: 0 }}>
+                  <button onClick={() => setSolver(key, Math.max(min, (solverConfig[key] as number) - 1))}
+                    disabled={(solverConfig[key] as number) <= min}
+                    style={{ width: 26, height: 26, border: 'none', background: 'transparent', color: 'var(--text-2)', borderRadius: 6, cursor: (solverConfig[key] as number) <= min ? 'not-allowed' : 'pointer', fontSize: 16, display: 'grid', placeItems: 'center', opacity: (solverConfig[key] as number) <= min ? 0.35 : 1 }}>−</button>
+                  <span style={{ fontFamily: '"IBM Plex Mono"', minWidth: 42, textAlign: 'center', fontSize: 13.5, fontWeight: 600 }}>{solverConfig[key]}{unit === 'horas' ? 'h' : 'd'}</span>
+                  <button onClick={() => setSolver(key, Math.min(max, (solverConfig[key] as number) + 1))}
+                    disabled={(solverConfig[key] as number) >= max}
+                    style={{ width: 26, height: 26, border: 'none', background: 'transparent', color: 'var(--text-2)', borderRadius: 6, cursor: (solverConfig[key] as number) >= max ? 'not-allowed' : 'pointer', fontSize: 16, display: 'grid', placeItems: 'center', opacity: (solverConfig[key] as number) >= max ? 0.35 : 1 }}>+</button>
+                </div>
+              </div>
+            ))}
+
+            {/* Boolean hard constraints */}
+            {[
+              { key: 'prevent_clopening' as const, label: 'Evitar clopening', hint: 'Prohíbe cierre nocturno seguido de apertura al día siguiente.' },
+              { key: 'allow_split_shifts' as const, label: 'Permitir turnos divididos', hint: 'Permite asignar dos franjas horarias en el mismo día.' },
+            ].map(({ key, label, hint }) => (
+              <div key={key} onClick={() => setSolver(key, !solverConfig[key])} role="button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '10px 12px', border: `1px solid ${border}`, borderRadius: 10, cursor: 'pointer', transition: 'border-color .12s' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = border; }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+                  <div style={{ fontSize: 11.5, color: text3, marginTop: 3, lineHeight: 1.4 }}>{hint}</div>
+                </div>
+                <span style={{ width: 38, height: 22, borderRadius: 99, position: 'relative', flexShrink: 0, background: solverConfig[key] ? accent : border, transition: 'background .2s' }}>
+                  <span style={{ position: 'absolute', top: 2, left: 2, width: 18, height: 18, borderRadius: 99, background: 'white', transition: 'transform .2s', transform: solverConfig[key] ? 'translateX(16px)' : 'none' }} />
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Soft constraints */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: text3, textTransform: 'uppercase', letterSpacing: '0.06em', paddingBottom: 8, borderBottom: `1px solid ${border}` }}>
+              Preferencias del algoritmo
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: text3, lineHeight: 1.5 }}>
+              El solver intentará cumplirlas, pero puede sacrificarlas si la cobertura lo exige.
+            </p>
+
+            {[
+              { key: 'group_days_off' as const, label: 'Agrupar días libres', hint: 'Prefiere que los descansos caigan juntos (ej. sáb y dom).' },
+              { key: 'fair_weekends' as const, label: 'Rotación justa de fines de semana', hint: 'Penaliza asignar fin de semana a quien ya trabajó el anterior.' },
+              { key: 'consistent_shifts' as const, label: 'Consistencia de turnos', hint: 'Evita mezclar franjas distintas dentro de la misma semana.' },
+              { key: 'rotate_shifts_weekly' as const, label: 'Rotación semanal de bloque', hint: 'Fuerza un cambio de franja respecto a la semana anterior.' },
+            ].map(({ key, label, hint }) => (
+              <div key={key} onClick={() => setSolver(key, !solverConfig[key])} role="button" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '10px 12px', border: `1px solid ${border}`, borderRadius: 10, cursor: 'pointer', transition: 'border-color .12s' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-strong)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = border; }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+                  <div style={{ fontSize: 11.5, color: text3, marginTop: 3, lineHeight: 1.4, maxWidth: 240 }}>{hint}</div>
+                </div>
+                <span style={{ width: 38, height: 22, borderRadius: 99, position: 'relative', flexShrink: 0, background: solverConfig[key] ? accent : border, transition: 'background .2s' }}>
+                  <span style={{ position: 'absolute', top: 2, left: 2, width: 18, height: 18, borderRadius: 99, background: 'white', transition: 'transform .2s', transform: solverConfig[key] ? 'translateX(16px)' : 'none' }} />
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -28,6 +28,10 @@ const paths: Record<string, React.ReactNode> = {
   sliders: <><path d="M4 8h10M18 8h2M4 16h2M10 16h10" /><circle cx="16" cy="8" r="2.2" /><circle cx="8" cy="16" r="2.2" /></>,
   warn: <><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17.2v.1" /></>,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
+  shield: <><path d="M12 3L4 7v5c0 5 4.4 8.7 8 9.9C16 20.7 20 17 20 12V7l-8-4z" /></>,
+  mail: <><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M3 6l9 7 9-7" /></>,
+  copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
+  logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></>,
 };
 
 export function Icon({ name, size = 16, stroke = 1.6, style }: IconProps) {

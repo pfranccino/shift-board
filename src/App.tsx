@@ -3,7 +3,8 @@ import { ThemeProvider, CssBaseline, GlobalStyles } from '@mui/material';
 import { createAppTheme } from './theme';
 import {
   buildRegistry, summarize, statusColors,
-  DEFAULT_CONFIG, INITIAL_WORKERS,
+  DEFAULT_CONFIG, DEFAULT_SOLVER_CONFIG, INITIAL_WORKERS,
+  blankShifts, getCurrentWeekKey, prevWeekKey, nextWeekKey,
 } from './data';
 import { Icon } from './components/Icon';
 import { TurnosView } from './views/Turnos';
@@ -11,9 +12,13 @@ import { AsistenteView } from './views/Asistente';
 import { TrabajadoresView } from './views/Trabajadores';
 import { EstadisticasView } from './views/Estadisticas';
 import { ConfiguracionView } from './views/Configuracion';
-import type { Worker, Config } from './types';
+import { EquipoView } from './views/Equipo';
+import { LoginView } from './views/Login';
+import { OnboardingView } from './views/Onboarding';
+import { initials, avatarBg } from './data';
+import type { Worker, Config, SolverConfig, MockUser, MockOrg, MockMember, MockInvitation, OrgRole, WeekSchedules, DayKey } from './types';
 
-type Tab = 'turnos' | 'asistente' | 'trabajadores' | 'estadisticas' | 'configuracion';
+type Tab = 'turnos' | 'asistente' | 'trabajadores' | 'estadisticas' | 'configuracion' | 'equipo';
 
 const NAV: { key: Tab; label: string; icon: string }[] = [
   { key: 'turnos', label: 'Turnos', icon: 'calendar' },
@@ -21,6 +26,7 @@ const NAV: { key: Tab; label: string; icon: string }[] = [
   { key: 'trabajadores', label: 'Trabajadores', icon: 'users' },
   { key: 'estadisticas', label: 'Estadísticas', icon: 'chart' },
   { key: 'configuracion', label: 'Configuración', icon: 'sliders' },
+  { key: 'equipo', label: 'Equipo', icon: 'shield' },
 ];
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -85,7 +91,20 @@ export default function App() {
   const [dark, setDark] = useState(() => loadJson<boolean>('sb_dark', false));
   const [tab, setTab] = useState<Tab>(() => (loadJson<string>('sb_tab', 'turnos') as Tab));
   const [config, setConfig] = useState<Config>(() => loadJson('sb_config_v2', DEFAULT_CONFIG));
-  const [workers, setWorkers] = useState<Worker[]>(() => loadJson('sb_workers_v2', INITIAL_WORKERS));
+  const [solverConfig, setSolverConfig] = useState<SolverConfig>(() => loadJson('sb_solver_v1', DEFAULT_SOLVER_CONFIG));
+  const [authUser, setAuthUser] = useState<MockUser | null>(() => loadJson('sb_user', null));
+  const [org, setOrg] = useState<MockOrg | null>(() => loadJson('sb_org', null));
+  const [members, setMembers] = useState<MockMember[]>(() => loadJson('sb_members', []));
+  const [invitations, setInvitations] = useState<MockInvitation[]>(() => loadJson('sb_invites', []));
+  const [selectedWeek, setSelectedWeek] = useState<string>(() => getCurrentWeekKey());
+  const [schedules, setSchedules] = useState<WeekSchedules>(() => loadJson('sb_schedules_v1', {}));
+  const [workers, setWorkers] = useState<Worker[]>(() => {
+    const raw = loadJson<any[]>('sb_workers_v2', INITIAL_WORKERS);
+    return raw.map((w) => ({
+      ...w,
+      contracted_hours: w.contracted_hours ?? (w.role === 'part' ? 20 : 40),
+    }));
+  });
 
   buildRegistry(config);
 
@@ -98,6 +117,68 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('sb_tab', tab); }, [tab]);
   useEffect(() => { localStorage.setItem('sb_config_v2', JSON.stringify(config)); }, [config]);
+  useEffect(() => { localStorage.setItem('sb_solver_v1', JSON.stringify(solverConfig)); }, [solverConfig]);
+  useEffect(() => { localStorage.setItem('sb_user', JSON.stringify(authUser)); }, [authUser]);
+  useEffect(() => { localStorage.setItem('sb_org', JSON.stringify(org)); }, [org]);
+  useEffect(() => { localStorage.setItem('sb_members', JSON.stringify(members)); }, [members]);
+  useEffect(() => { localStorage.setItem('sb_invites', JSON.stringify(invitations)); }, [invitations]);
+  useEffect(() => { localStorage.setItem('sb_schedules_v1', JSON.stringify(schedules)); }, [schedules]);
+
+  // Seed current week from workers.shifts on first load
+  useEffect(() => {
+    setSchedules((prev) => {
+      if (prev[selectedWeek]) return prev;
+      const seed: Record<string, Record<DayKey, string>> = {};
+      workers.forEach((w) => { seed[w.id] = { ...(w.shifts as Record<DayKey, string>) }; });
+      return { ...prev, [selectedWeek]: seed };
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayWorkers = workers.map((w) => ({
+    ...w,
+    shifts: (schedules[selectedWeek]?.[w.id] ?? blankShifts()) as Worker['shifts'],
+  }));
+
+  const handleAssign = (workerId: string, dayKey: string, shiftKey: string) => {
+    setSchedules((prev) => {
+      const week = prev[selectedWeek] ?? {};
+      const ws = week[workerId] ?? blankShifts();
+      return { ...prev, [selectedWeek]: { ...week, [workerId]: { ...ws, [dayKey]: shiftKey } } };
+    });
+  };
+
+  const handleApplySchedule = (assignments: Record<string, Record<DayKey, string>>) => {
+    setSchedules((prev) => ({
+      ...prev,
+      [selectedWeek]: { ...(prev[selectedWeek] ?? {}), ...assignments },
+    }));
+  };
+
+  const appPhase: 'login' | 'onboarding' | 'app' = !authUser ? 'login' : !org ? 'onboarding' : 'app';
+
+  const handleLogin = (user: MockUser) => setAuthUser(user);
+
+  const handleCreateOrg = (orgName: string) => {
+    const newOrg: MockOrg = { id: `org_${Date.now()}`, name: orgName };
+    const owner: MockMember = { id: authUser!.id, name: authUser!.name, email: authUser!.email, role: 'owner' };
+    setOrg(newOrg);
+    setMembers([owner]);
+  };
+
+  const handleLogout = () => {
+    setAuthUser(null);
+    setOrg(null);
+    setMembers([]);
+    setInvitations([]);
+    ['sb_user', 'sb_org', 'sb_members', 'sb_invites'].forEach((k) => localStorage.removeItem(k));
+  };
+
+  const handleInvite = (email: string, role: Exclude<OrgRole, 'owner'>): MockInvitation => {
+    const token = Math.random().toString(36).slice(2, 10).toUpperCase();
+    const inv: MockInvitation = { id: `inv_${Date.now()}`, email, role, token, createdAt: new Date().toISOString() };
+    setInvitations((prev) => [...prev, inv]);
+    return inv;
+  };
   useEffect(() => { localStorage.setItem('sb_workers_v2', JSON.stringify(workers)); }, [workers]);
 
   const s = summarize(workers);
@@ -118,7 +199,9 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <GlobalStyles styles={globalCss} />
-      <div className="app-grid">
+      {appPhase === 'login' && <LoginView dark={dark} onLogin={handleLogin} />}
+      {appPhase === 'onboarding' && <OnboardingView user={authUser!} dark={dark} onCreateOrg={handleCreateOrg} onLogout={handleLogout} />}
+      {appPhase !== 'app' ? null : <div className="app-grid">
         {/* Sidebar */}
         <aside style={{
           background: sidebarBg, borderRight: `1px solid ${borderColor}`,
@@ -133,7 +216,10 @@ export default function App() {
             }}>
               <Icon name="calendar" size={18} stroke={1.9} />
             </span>
-            <span className="sb-name" style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em', color: 'var(--text-1)' }}>ShiftBoard</span>
+            <div className="sb-name" style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em', color: 'var(--text-1)', lineHeight: 1.2 }}>ShiftBoard</div>
+              {org && <div style={{ fontSize: 11, color: text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{org.name}</div>}
+            </div>
           </div>
 
           {/* Nav */}
@@ -178,6 +264,32 @@ export default function App() {
             ))}
           </div>
 
+          {/* User info */}
+          {authUser && (
+            <div style={{ paddingTop: 8, borderTop: `1px solid ${borderColor}`, marginTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 4px' }}>
+                <span style={{
+                  width: 28, height: 28, borderRadius: 8, display: 'grid', placeItems: 'center',
+                  fontSize: 10, fontWeight: 600, background: avatarBg(authUser.name, dark),
+                  color: dark ? 'oklch(0.85 0.01 260)' : 'oklch(0.25 0.01 260)', flexShrink: 0,
+                }}>{initials(authUser.name)}</span>
+                <div className="sb-name" style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUser.name}</div>
+                  <div style={{ fontSize: 11, color: text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUser.email}</div>
+                </div>
+                <button onClick={handleLogout} title="Cerrar sesión" style={{
+                  width: 26, height: 26, borderRadius: 7, border: 'none', background: 'transparent',
+                  color: text3, cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0,
+                }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--text-1)'; (e.currentTarget as HTMLElement).style.background = 'var(--hover)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = text3; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <Icon name="logout" size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Theme toggle */}
           <div style={{ paddingTop: 12 }}>
             <button onClick={() => setDark(!dark)} style={{
@@ -204,13 +316,23 @@ export default function App() {
 
         {/* Main */}
         <main style={{ overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg)', minWidth: 0 }}>
-          {tab === 'turnos' && <TurnosView workers={workers} setWorkers={setWorkers} dark={dark} />}
-          {tab === 'asistente' && <AsistenteView workers={workers} setWorkers={setWorkers} dark={dark} goTab={setTab} />}
-          {tab === 'trabajadores' && <TrabajadoresView workers={workers} setWorkers={setWorkers} dark={dark} />}
-          {tab === 'estadisticas' && <EstadisticasView workers={workers} dark={dark} />}
-          {tab === 'configuracion' && <ConfiguracionView config={config} setConfig={setConfig} workers={workers} setWorkers={setWorkers} dark={dark} />}
+          {tab === 'turnos' && <TurnosView workers={displayWorkers} selectedWeek={selectedWeek} onPrevWeek={() => setSelectedWeek(prevWeekKey(selectedWeek))} onNextWeek={() => setSelectedWeek(nextWeekKey(selectedWeek))} onAssign={handleAssign} dark={dark} />}
+          {tab === 'asistente' && <AsistenteView workers={displayWorkers} selectedWeek={selectedWeek} onApplySchedule={handleApplySchedule} dark={dark} goTab={setTab} />}
+          {tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={setWorkers} dark={dark} />}
+          {tab === 'estadisticas' && <EstadisticasView workers={displayWorkers} dark={dark} />}
+          {tab === 'configuracion' && <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={workers} setWorkers={setWorkers} dark={dark} />}
+          {tab === 'equipo' && authUser && org && (
+            <EquipoView
+              currentUser={authUser} org={org}
+              members={members} invitations={invitations}
+              onInvite={handleInvite}
+              onRemoveMember={(id) => setMembers((prev) => prev.filter((m) => m.id !== id))}
+              onCancelInvite={(id) => setInvitations((prev) => prev.filter((i) => i.id !== id))}
+              dark={dark}
+            />
+          )}
         </main>
-      </div>
+      </div>}
     </ThemeProvider>
   );
 }

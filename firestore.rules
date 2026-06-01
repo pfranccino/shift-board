@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ──────────────────────────────────────────────────
+
+    function isMember(orgId) {
+      return exists(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + orgId));
+    }
+
+    function memberRole(orgId) {
+      return get(/databases/$(database)/documents/memberships/$(request.auth.uid + '_' + orgId)).data.role;
+    }
+
+    function isOwnerOrAdmin(orgId) {
+      return memberRole(orgId) in ['owner', 'admin'];
+    }
+
+    // ── Memberships ───────────────────────────────────────────────────────
+
+    match /memberships/{membershipId} {
+      // Members can read their own memberships; owners/admins can read any within their org
+      allow read: if request.auth != null &&
+        (membershipId.split('_')[0] == request.auth.uid ||
+         isOwnerOrAdmin(membershipId.split('_')[1]));
+      allow create: if false; // Created via Cloud Functions or server SDK only
+      allow delete: if request.auth != null && isOwnerOrAdmin(resource.data.org_id);
+    }
+
+    // ── Invitations ───────────────────────────────────────────────────────
+
+    match /invitations/{token} {
+      allow read: if true; // Public so invited users can fetch their invite by token
+      allow create: if request.auth != null && isOwnerOrAdmin(request.resource.data.org_id);
+      allow update: if false; // Marked as used server-side only
+      allow delete: if request.auth != null && isOwnerOrAdmin(resource.data.org_id);
+    }
+
+    // ── Organizations ─────────────────────────────────────────────────────
+
+    match /organizations/{orgId} {
+      allow read, write: if request.auth != null && isMember(orgId);
+
+      // Workers
+      match /workers/{workerId} {
+        allow read: if request.auth != null && isMember(orgId);
+        allow write: if request.auth != null && isMember(orgId);
+      }
+
+      // Config (shift types, categories, coverage, solver settings)
+      match /config/{configId} {
+        allow read: if request.auth != null && isMember(orgId);
+        allow write: if request.auth != null && isOwnerOrAdmin(orgId);
+      }
+
+      // Schedules (assignments per week)
+      match /schedules/{weekKey}/assignments/{workerId} {
+        allow read: if request.auth != null && isMember(orgId);
+        allow write: if request.auth != null && isMember(orgId);
+      }
+
+      // Solver jobs — members can read, only server SDK writes
+      match /jobs/{jobId} {
+        allow read: if request.auth != null && isMember(orgId);
+        allow create: if false; // Created by Vercel API only
+        allow update: if false; // Updated by Cloud Run only
+      }
+    }
+  }
+}

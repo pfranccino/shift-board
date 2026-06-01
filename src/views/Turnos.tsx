@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   getShift, getShiftIds, getCatIds, getCat, getCoverage,
   shiftColors, catColors, statusColors, complianceStatus, coverageMatrix,
-  initials, avatarBg, DAYS, ROLES,
+  initials, avatarBg, DAYS, ROLES, getWeekDates, formatWeekRange, isToday,
 } from '../data';
 import { ShiftChip } from '../components/ShiftChip';
 import { HoursBar } from '../components/HoursBar';
@@ -11,7 +11,10 @@ import type { Worker } from '../types';
 
 interface Props {
   workers: Worker[];
-  setWorkers: React.Dispatch<React.SetStateAction<Worker[]>>;
+  selectedWeek: string;
+  onPrevWeek: () => void;
+  onNextWeek: () => void;
+  onAssign: (workerId: string, dayKey: string, shiftKey: string) => void;
   dark: boolean;
 }
 
@@ -194,17 +197,17 @@ function CoveragePanel({ workers, days, dark }: { workers: Worker[]; days: typeo
   );
 }
 
-export function TurnosView({ workers, setWorkers, dark }: Props) {
+export function TurnosView({ workers, selectedWeek, onPrevWeek, onNextWeek, onAssign, dark }: Props) {
   const [active, setActive] = useState<ActiveCell | null>(null);
   const [catFilter, setCatFilter] = useState('Todas');
 
   const cats = [{ key: 'Todas', label: 'Todas' }, ...getCatIds().map((id) => ({ key: id, label: getCat(id).name }))];
   const days = DAYS;
+  const weekDates = getWeekDates(selectedWeek);
   const visible = catFilter === 'Todas' ? workers : workers.filter((w) => w.cat === catFilter);
 
   const assign = (workerId: string, dayKey: string, shiftKey: string) => {
-    setWorkers((prev) => prev.map((w) =>
-      w.id === workerId ? { ...w, shifts: { ...w.shifts, [dayKey]: shiftKey } } : w));
+    onAssign(workerId, dayKey, shiftKey);
     setActive(null);
   };
 
@@ -220,16 +223,16 @@ export function TurnosView({ workers, setWorkers, dark }: Props) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 22, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Cuadro de turnos</h1>
-          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>Semana actual · Clic en una celda para asignar</p>
+          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>{formatWeekRange(selectedWeek)} · Clic en una celda para asignar</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <button className="icon-btn" style={{
+            <button onClick={onPrevWeek} style={{
               display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8,
               border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer',
             }} aria-label="Semana anterior"><Icon name="chevL" size={16} /></button>
-            <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12.5, padding: '0 4px', color: 'var(--text-2)' }}>Sem actual</span>
-            <button style={{
+            <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12, padding: '0 6px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{selectedWeek}</span>
+            <button onClick={onNextWeek} style={{
               display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8,
               border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer',
             }} aria-label="Semana siguiente"><Icon name="chevR" size={16} /></button>
@@ -250,15 +253,27 @@ export function TurnosView({ workers, setWorkers, dark }: Props) {
                 height: 44, textAlign: 'left', paddingLeft: 18, minWidth: 210,
                 borderRight: `1px solid ${border}`,
               }}>Trabajador</th>
-              {days.map((d) => (
-                <th key={d.key} style={{
-                  position: 'sticky', top: 0, zIndex: 3, background: surface2,
-                  borderBottom: `1px solid ${border}`, fontWeight: 600, fontSize: 11,
-                  letterSpacing: '0.04em', textTransform: 'uppercase', color: text3,
-                  height: 44, textAlign: 'center', minWidth: 104,
-                  ...(d.weekend ? { background: surface2 } : {}),
-                }}>{d.short}</th>
-              ))}
+              {days.map((d) => {
+                const date = weekDates[d.key];
+                const today = isToday(date);
+                return (
+                  <th key={d.key} style={{
+                    position: 'sticky', top: 0, zIndex: 3, background: surface2,
+                    borderBottom: `1px solid ${border}`, fontWeight: 600, fontSize: 11,
+                    letterSpacing: '0.04em', textTransform: 'uppercase', color: text3,
+                    height: 52, textAlign: 'center', minWidth: 104,
+                  }}>
+                    <div style={{ color: today ? accent : text3 }}>{d.short}</div>
+                    <div style={{
+                      fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, fontWeight: today ? 700 : 500,
+                      letterSpacing: 0, textTransform: 'none', marginTop: 2,
+                      color: today ? accent : text3,
+                    }}>
+                      {date.getUTCDate()} {['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][date.getUTCMonth()]}
+                    </div>
+                  </th>
+                );
+              })}
               <th style={{
                 position: 'sticky', right: 0, zIndex: 4, background: surface2,
                 borderBottom: `1px solid ${border}`, fontWeight: 600, fontSize: 11,

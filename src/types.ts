@@ -7,6 +7,8 @@ export interface Worker {
   name: string;
   cat: string;
   role: Role;
+  contracted_hours: number;
+  unavailable_dates?: string[];
   shifts: Record<DayKey, string>;
 }
 
@@ -39,6 +41,50 @@ export interface Config {
   categories: Category[];
   shiftTypes: ShiftType[];
   coverage: Record<string, number>;
+}
+
+export interface SolverConfig {
+  // Hard constraints
+  min_rest_hours: number;
+  prevent_clopening: boolean;
+  max_consecutive_days: number;
+  max_weekly_hours: number;
+  allow_split_shifts: boolean;
+  // Soft constraints
+  group_days_off: boolean;
+  fair_weekends: boolean;
+  consistent_shifts: boolean;
+  rotate_shifts_weekly: boolean;
+}
+
+export type WeekSchedules = Record<string, Record<string, Record<DayKey, string>>>;
+
+export type OrgRole = 'owner' | 'admin' | 'manager';
+
+export interface MockUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface MockOrg {
+  id: string;
+  name: string;
+}
+
+export interface MockMember {
+  id: string;
+  name: string;
+  email: string;
+  role: OrgRole;
+}
+
+export interface MockInvitation {
+  id: string;
+  email: string;
+  role: Exclude<OrgRole, 'owner'>;
+  token: string;
+  createdAt: string;
 }
 
 export interface HueColors {

@@ -39,16 +39,19 @@ function Seg({ options, value, onChange }: { options: { key: string; label: stri
 function WorkerModal({ initial, dark, onSave, onClose }: {
   initial?: Worker;
   dark: boolean;
-  onSave: (data: { name: string; role: Role; cat: string }) => void;
+  onSave: (data: { name: string; role: Role; cat: string; contracted_hours: number }) => void;
   onClose: () => void;
 }) {
   const catIds = getCatIds();
   const [name, setName] = useState(initial?.name || '');
   const [role, setRole] = useState<Role>(initial?.role || 'full');
   const [cat, setCat] = useState(initial?.cat || catIds[0]);
+  const [contractedHours, setContractedHours] = useState<number>(
+    initial?.contracted_hours ?? ROLES[initial?.role || 'full'].target
+  );
   const editing = !!initial;
 
-  const save = () => { if (name.trim() && cat) onSave({ name: name.trim(), role, cat }); };
+  const save = () => { if (name.trim() && cat) onSave({ name: name.trim(), role, cat, contracted_hours: contractedHours }); };
 
   const inputSx = {
     '& .MuiOutlinedInput-root': {
@@ -88,10 +91,24 @@ function WorkerModal({ initial, dark, onSave, onClose }: {
           <Seg
             options={Object.values(ROLES).map((r) => ({
               key: r.key,
-              label: <>{r.label} <span style={{ fontFamily: '"IBM Plex Mono", monospace', opacity: 0.6, marginLeft: 4 }}>{r.target}h</span></>,
+              label: <>{r.label}</>,
             }))}
             value={role}
-            onChange={(v) => setRole(v as Role)}
+            onChange={(v) => {
+              const next = v as Role;
+              if (contractedHours === ROLES[role].target) setContractedHours(ROLES[next].target);
+              setRole(next);
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Horas contratadas semanales</span>
+          <TextField
+            type="number"
+            value={contractedHours}
+            onChange={(e) => setContractedHours(Math.max(1, Math.floor(Number(e.target.value))))}
+            inputProps={{ min: 1, max: 168 }}
+            sx={inputSx} size="small"
           />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
@@ -147,12 +164,12 @@ export function TrabajadoresView({ workers, setWorkers, dark }: Props) {
     w.name.toLowerCase().includes(query.toLowerCase()) ||
     getCat(w.cat).name.toLowerCase().includes(query.toLowerCase()));
 
-  const addWorker = (data: { name: string; role: Role; cat: string }) => {
+  const addWorker = (data: { name: string; role: Role; cat: string; contracted_hours: number }) => {
     const blank: Worker['shifts'] = { lun: 'libre', mar: 'libre', mie: 'libre', jue: 'libre', vie: 'libre', sab: 'libre', dom: 'libre' };
     setWorkers((prev) => [...prev, { id: `w${Date.now()}`, ...data, shifts: blank }]);
     setModal(null);
   };
-  const editWorker = (id: string, data: { name: string; role: Role; cat: string }) => {
+  const editWorker = (id: string, data: { name: string; role: Role; cat: string; contracted_hours: number }) => {
     setWorkers((prev) => prev.map((w) => (w.id === id ? { ...w, ...data } : w)));
     setModal(null);
   };

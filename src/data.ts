@@ -1,6 +1,6 @@
 import type {
   Worker, Config, ShiftInfo, HueColors, ComplianceResult,
-  ComplianceStatus, CoverageSummary, Summary, DayKey, Role,
+  ComplianceStatus, CoverageSummary, Summary, DayKey, Role, SolverConfig,
 } from './types';
 
 export const DAYS: { key: DayKey; label: string; short: string; weekend?: boolean }[] = [
@@ -22,6 +22,18 @@ export const HUE_PALETTE = [250, 70, 35, 270, 180, 320, 145, 20, 300, 110];
 
 export const STATUS_LABEL: Record<ComplianceStatus, string> = {
   exact: 'Exacto', over: 'Exceso', under: 'Déficit',
+};
+
+export const DEFAULT_SOLVER_CONFIG: SolverConfig = {
+  min_rest_hours: 11,
+  prevent_clopening: true,
+  max_consecutive_days: 6,
+  max_weekly_hours: 48,
+  allow_split_shifts: false,
+  group_days_off: true,
+  fair_weekends: true,
+  consistent_shifts: true,
+  rotate_shifts_weekly: true,
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -91,8 +103,8 @@ export function getCatIds(): string[] { return catIds; }
 export function getCoverage(): Record<string, number> { return coverageMap; }
 
 // ---- Initial data ----
-function mk(id: string, name: string, cat: string, role: Role, shifts: Record<DayKey, string>): Worker {
-  return { id, name, cat, role, shifts };
+function mk(id: string, name: string, cat: string, role: Role, contracted_hours: number, shifts: Record<DayKey, string>): Worker {
+  return { id, name, cat, role, contracted_hours, shifts };
 }
 const L = 'libre';
 function sd(pairs: Partial<Record<DayKey, string>>): Record<DayKey, string> {
@@ -101,18 +113,18 @@ function sd(pairs: Partial<Record<DayKey, string>>): Record<DayKey, string> {
 }
 
 export const INITIAL_WORKERS: Worker[] = [
-  mk('w1', 'Carlos Núñez', 'bombero', 'full', sd({ lun: 'manana', mar: 'manana', mie: 'manana', jue: 'manana', vie: 'manana' })),
-  mk('w2', 'Andrés Rojas', 'bombero', 'full', sd({ lun: 'manana', mar: 'manana', mie: 'manana', jue: 'manana', vie: 'manana' })),
-  mk('w3', 'Sofía Ibarra', 'bombero', 'full', sd({ mie: 'manana', jue: 'manana', vie: 'manana', sab: 'manana', dom: 'manana' })),
-  mk('w4', 'Pablo Sosa', 'bombero', 'full', sd({ lun: 'tarde', mar: 'tarde', mie: 'tarde', jue: 'tarde', vie: 'tarde' })),
-  mk('w5', 'Marcos Leiva', 'bombero', 'full', sd({ jue: 'tarde', vie: 'tarde', sab: 'tarde', dom: 'tarde', lun: 'tarde' })),
-  mk('w6', 'Lucas Vera', 'bombero', 'full', sd({ lun: 'tarde', mar: 'tarde', mie: 'tarde', sab: 'tarde' })),
-  mk('w7', 'Diego Ferreyra', 'bombero', 'full', sd({ lun: 'noche', mar: 'noche', mie: 'noche', jue: 'noche', vie: 'noche' })),
-  mk('w8', 'Hernán Pérez', 'bombero', 'full', sd({ vie: 'noche', sab: 'noche', dom: 'noche', lun: 'noche', mar: 'noche', mie: 'noche' })),
-  mk('w9', 'Marina López', 'admin', 'full', sd({ lun: 'manana', mar: 'manana', mie: 'manana', jue: 'manana', vie: 'manana' })),
-  mk('w10', 'Gabriel Ortiz', 'admin', 'part', sd({ lun: 'medioDia', mar: 'medioDia', mie: 'medioDia', jue: 'medioDia', vie: 'medioDia' })),
-  mk('w11', 'Tamara Ruiz', 'bombero', 'part', sd({ lun: 'medioDia', mar: 'medioDia', mie: 'medioDia', jue: 'medioDia', vie: 'medioDia' })),
-  mk('w12', 'Nicolás Aguilar', 'bombero', 'part', sd({ mie: 'medioDia', jue: 'medioDia', vie: 'medioDia', sab: 'medioDia', dom: 'medioDia' })),
+  mk('w1', 'Carlos Núñez', 'bombero', 'full', 40, sd({ lun: 'manana', mar: 'manana', mie: 'manana', jue: 'manana', vie: 'manana' })),
+  mk('w2', 'Andrés Rojas', 'bombero', 'full', 40, sd({ lun: 'manana', mar: 'manana', mie: 'manana', jue: 'manana', vie: 'manana' })),
+  mk('w3', 'Sofía Ibarra', 'bombero', 'full', 40, sd({ mie: 'manana', jue: 'manana', vie: 'manana', sab: 'manana', dom: 'manana' })),
+  mk('w4', 'Pablo Sosa', 'bombero', 'full', 40, sd({ lun: 'tarde', mar: 'tarde', mie: 'tarde', jue: 'tarde', vie: 'tarde' })),
+  mk('w5', 'Marcos Leiva', 'bombero', 'full', 40, sd({ jue: 'tarde', vie: 'tarde', sab: 'tarde', dom: 'tarde', lun: 'tarde' })),
+  mk('w6', 'Lucas Vera', 'bombero', 'full', 40, sd({ lun: 'tarde', mar: 'tarde', mie: 'tarde', sab: 'tarde' })),
+  mk('w7', 'Diego Ferreyra', 'bombero', 'full', 40, sd({ lun: 'noche', mar: 'noche', mie: 'noche', jue: 'noche', vie: 'noche' })),
+  mk('w8', 'Hernán Pérez', 'bombero', 'full', 40, sd({ vie: 'noche', sab: 'noche', dom: 'noche', lun: 'noche', mar: 'noche', mie: 'noche' })),
+  mk('w9', 'Marina López', 'admin', 'full', 40, sd({ lun: 'manana', mar: 'manana', mie: 'manana', jue: 'manana', vie: 'manana' })),
+  mk('w10', 'Gabriel Ortiz', 'admin', 'part', 20, sd({ lun: 'medioDia', mar: 'medioDia', mie: 'medioDia', jue: 'medioDia', vie: 'medioDia' })),
+  mk('w11', 'Tamara Ruiz', 'bombero', 'part', 20, sd({ lun: 'medioDia', mar: 'medioDia', mie: 'medioDia', jue: 'medioDia', vie: 'medioDia' })),
+  mk('w12', 'Nicolás Aguilar', 'bombero', 'part', 20, sd({ mie: 'medioDia', jue: 'medioDia', vie: 'medioDia', sab: 'medioDia', dom: 'medioDia' })),
 ];
 
 // ---- Colors ----
@@ -158,7 +170,7 @@ export function weeklyHours(worker: Worker): number {
 }
 
 export function targetHours(worker: Worker): number {
-  return ROLES[worker.role].target;
+  return worker.contracted_hours;
 }
 
 export function complianceStatus(worker: Worker): ComplianceResult {
@@ -250,3 +262,69 @@ export function genId(name: string, existing: string[]): string {
 
 // Initialize registry with default config
 buildRegistry(DEFAULT_CONFIG);
+
+// ---- Week utilities ----
+export function blankShifts(): Record<DayKey, string> {
+  const b = {} as Record<DayKey, string>;
+  DAYS.forEach((d) => { b[d.key] = 'libre'; });
+  return b;
+}
+
+function weekKeyFromDate(d: Date): string {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
+export function getCurrentWeekKey(): string { return weekKeyFromDate(new Date()); }
+
+export function getWeekDates(weekKey: string): Record<DayKey, Date> {
+  const [yearStr, weekStr] = weekKey.split('-W');
+  const year = Number(yearStr);
+  const week = Number(weekStr);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dow = jan4.getUTCDay() || 7;
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - dow + 1 + (week - 1) * 7);
+  const keys: DayKey[] = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
+  const result = {} as Record<DayKey, Date>;
+  keys.forEach((key, i) => {
+    const d = new Date(monday);
+    d.setUTCDate(monday.getUTCDate() + i);
+    result[key] = d;
+  });
+  return result;
+}
+
+export function prevWeekKey(weekKey: string): string {
+  const { lun } = getWeekDates(weekKey);
+  const d = new Date(lun); d.setUTCDate(d.getUTCDate() - 7);
+  return weekKeyFromDate(d);
+}
+
+export function nextWeekKey(weekKey: string): string {
+  const { lun } = getWeekDates(weekKey);
+  const d = new Date(lun); d.setUTCDate(d.getUTCDate() + 7);
+  return weekKeyFromDate(d);
+}
+
+const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+export function formatWeekRange(weekKey: string): string {
+  const { lun: mon, dom: sun } = getWeekDates(weekKey);
+  const monD = mon.getUTCDate(), sunD = sun.getUTCDate();
+  const monM = MONTHS_ES[mon.getUTCMonth()], sunM = MONTHS_ES[sun.getUTCMonth()];
+  const year = sun.getUTCFullYear();
+  return mon.getUTCMonth() === sun.getUTCMonth()
+    ? `${monD}–${sunD} ${monM} ${year}`
+    : `${monD} ${monM} – ${sunD} ${sunM} ${year}`;
+}
+
+export function isToday(date: Date): boolean {
+  const now = new Date();
+  return date.getUTCFullYear() === now.getFullYear()
+    && date.getUTCMonth() === now.getMonth()
+    && date.getUTCDate() === now.getDate();
+}
