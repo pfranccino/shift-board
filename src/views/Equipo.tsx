@@ -120,7 +120,7 @@ function InviteModal({ dark, onInvite, onClose }: {
               <Icon name="check" size={18} style={{ color: 'oklch(0.55 0.15 145)', flexShrink: 0 }} />
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Invitación generada</div>
-                <div style={{ fontSize: 12, color: text3 }}>Enviá este enlace a <strong>{generated.email}</strong></div>
+                <div style={{ fontSize: 12, color: text3 }}>Envía este enlace a <strong>{generated.email}</strong></div>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -221,7 +221,7 @@ export function EquipoView({ currentUser, org, members, invitations, onInvite, o
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 13.5, fontWeight: 500 }}>{m.name}</span>
-                  {isMe && <span style={{ fontSize: 11, color: text3 }}>(vos)</span>}
+                  {isMe && <span style={{ fontSize: 11, color: text3 }}>(tú)</span>}
                 </div>
                 <div style={{ fontSize: 12, color: text3, marginTop: 2 }}>{m.email}</div>
               </div>
@@ -290,7 +290,7 @@ export function EquipoView({ currentUser, org, members, invitations, onInvite, o
           <DialogTitle sx={{ fontFamily: '"IBM Plex Sans"', fontSize: 16, fontWeight: 600 }}>Eliminar miembro</DialogTitle>
           <DialogContent>
             <p style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.5, margin: 0 }}>
-              ¿Seguro que querés eliminar a <strong style={{ color: 'var(--text-1)' }}>{confirm.name}</strong> del equipo?
+              ¿Estás seguro de que quieres eliminar a <strong style={{ color: 'var(--text-1)' }}>{confirm.name}</strong> del equipo?
             </p>
           </DialogContent>
           <DialogActions sx={{ px: 2.5, pb: 2.5, gap: 1 }}>

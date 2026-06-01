@@ -257,7 +257,7 @@ export function ConfiguracionView({ config, setConfig, solverConfig, setSolverCo
     <div className="view-pad">
       <div style={{ marginBottom: 22 }}>
         <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Configuración</h1>
-        <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>Definí los puestos, franjas horarias, cobertura y las reglas del motor de optimización.</p>
+        <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>Define los puestos, franjas horarias, cobertura y las reglas del motor de optimización.</p>
       </div>
 
       <div className="config-cols">

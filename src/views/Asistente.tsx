@@ -104,7 +104,7 @@ function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): In
       type: 'coverage',
       title: `Turno ${s.name} — Cobertura insuficiente`,
       detail: `${gaps.length} día(s) no alcanzan el mínimo requerido. Falta hasta ${maxGap} persona(s) por día.`,
-      suggestion: `Reducí la cobertura mínima del turno ${s.name} en Configuración, o habilitá fines de semana para distribuir la carga.`,
+      suggestion: `Reduce la cobertura mínima del turno ${s.name} en Configuración, o habilita los fines de semana para distribuir la carga.`,
     });
   });
 
@@ -114,7 +114,7 @@ function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): In
         type: 'hours',
         title: `${p.worker.name} — Déficit crítico de horas`,
         detail: `Solo se pueden asignar ${p.hours}h de ${p.target}h contratadas con los parámetros actuales.`,
-        suggestion: `Reducí los días libres mínimos, habilitá fines de semana, o cambiá el turno base a uno de mayor duración.`,
+        suggestion: `Reduce los días libres mínimos, habilita los fines de semana, o cambia el turno base a uno de mayor duración.`,
       });
     }
   });
@@ -124,7 +124,7 @@ function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): In
       type: 'staff',
       title: 'Sin trabajadores en el alcance seleccionado',
       detail: 'No hay trabajadores que cumplan los filtros de la propuesta.',
-      suggestion: 'Cambiá el alcance a "Todas" las categorías o agregá trabajadores.',
+      suggestion: 'Cambia el alcance a "Todas" las categorías o agrega trabajadores.',
     });
   }
 
@@ -377,7 +377,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 22, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Asistente de asignación</h1>
-          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>{formatWeekRange(selectedWeek)} · Definí restricciones y el sistema propone un cuadro. Revisás antes de aplicar.</p>
+          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>{formatWeekRange(selectedWeek)} · Define las restricciones y el sistema propone un cuadro. Puedes revisar antes de aplicar.</p>
         </div>
       </div>
 
@@ -529,7 +529,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
               </span>
               <div style={{ fontSize: 15, fontWeight: 600 }}>Sin propuesta todavía</div>
               <p style={{ fontSize: 13, color: text3, maxWidth: 320, lineHeight: 1.5, margin: 0 }}>
-                Ajustá las restricciones a la izquierda y generá una propuesta. Vas a poder revisar cada cambio antes de aplicarlo al cuadro real.
+                Ajusta las restricciones a la izquierda y genera una propuesta. Podrás revisar cada cambio antes de aplicarlo al cuadro real.
               </p>
             </div>
           )}
@@ -607,7 +607,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                 <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 18, padding: '12px 14px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
                   <Icon name="warn" size={14} style={{ flexShrink: 0, marginTop: 1, color: statusColors('under', dark).fg }} />
                   <span>
-                    {summary!.warn > 0 && 'Algunos trabajadores no alcanzan su meta: reducí los días libres mínimos, cambiá el turno base o habilitá los fines de semana. '}
+                    {summary!.warn > 0 && 'Algunos trabajadores no alcanzan su meta: reduce los días libres mínimos, cambia el turno base o habilita los fines de semana. '}
                     {summary!.cov.gaps.length > 0 && `Quedan ${summary!.cov.gaps.length} franja(s)-día por debajo del mínimo de cobertura.`}
                   </span>
                 </div>

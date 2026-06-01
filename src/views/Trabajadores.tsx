@@ -310,7 +310,7 @@ export function TrabajadoresView({ workers, setWorkers, dark }: Props) {
           <DialogTitle sx={{ fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 16, fontWeight: 600 }}>Eliminar trabajador</DialogTitle>
           <DialogContent>
             <p style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.5, margin: 0 }}>
-              ¿Seguro que querés eliminar a <strong style={{ color: 'var(--text-1)' }}>{confirm.name}</strong>? Se quitará del cuadro de turnos.
+              ¿Estás seguro de que quieres eliminar a <strong style={{ color: 'var(--text-1)' }}>{confirm.name}</strong>? Se quitará del cuadro de turnos.
             </p>
           </DialogContent>
           <DialogActions sx={{ px: 2.5, pb: 2.5, gap: 1 }}>
