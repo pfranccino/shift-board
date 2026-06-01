@@ -125,8 +125,8 @@ export function LoginView({ dark, onLogin }: Props) {
         <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.025em', margin: '0 0 6px' }}>Iniciar sesión</h1>
         <p style={{ fontSize: 13, color: text3, margin: '0 0 24px', lineHeight: 1.5 }}>
           {isFirebaseConfigured
-            ? 'Ingresá tu nombre, correo y contraseña. Si no tenés cuenta, la creamos automáticamente.'
-            : 'Accedé a tu cuenta para gestionar los turnos de tu negocio.'}
+            ? 'Ingresa tu nombre, correo y contraseña. Si no tienes cuenta, la creamos automáticamente.'
+            : 'Accede a tu cuenta para gestionar los turnos de tu negocio.'}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

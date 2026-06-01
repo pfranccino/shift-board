@@ -6,12 +6,14 @@ import type { MockUser } from '../types';
 interface Props {
   user: MockUser;
   dark: boolean;
-  onCreateOrg: (orgName: string) => void;
+  onCreateOrg: (orgName: string) => Promise<void>;
   onLogout: () => void;
 }
 
 export function OnboardingView({ user, dark, onCreateOrg, onLogout }: Props) {
   const [orgName, setOrgName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
   const accent = '#4664c9';
@@ -27,7 +29,17 @@ export function OnboardingView({ user, dark, onCreateOrg, onLogout }: Props) {
     },
   };
 
-  const submit = () => { if (orgName.trim()) onCreateOrg(orgName.trim()); };
+  const submit = async () => {
+    if (!orgName.trim() || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await onCreateOrg(orgName.trim());
+    } catch {
+      setError('No se pudo crear la organización. Verifica tu conexión e intenta nuevamente.');
+      setLoading(false);
+    }
+  };
 
   return (
     <div style={{
@@ -52,11 +64,11 @@ export function OnboardingView({ user, dark, onCreateOrg, onLogout }: Props) {
 
         <div style={{ marginBottom: 28 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.025em', margin: '0 0 6px' }}>
-            Creá tu organización
+            Crea tu organización
           </h1>
           <p style={{ fontSize: 13, color: text3, margin: 0, lineHeight: 1.5 }}>
-            Hola <strong style={{ color: 'var(--text-1)' }}>{user.name.split(' ')[0]}</strong>. Ingresá el nombre de tu negocio para empezar.
-            Después podés invitar a otros mánagers.
+            Hola <strong style={{ color: 'var(--text-1)' }}>{user.name.split(' ')[0]}</strong>. Ingresa el nombre de tu negocio para comenzar.
+            Después puedes invitar a otros gerentes.
           </p>
         </div>
 
@@ -64,21 +76,25 @@ export function OnboardingView({ user, dark, onCreateOrg, onLogout }: Props) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Nombre del negocio</span>
             <TextField
-              autoFocus value={orgName} placeholder="Ej. Restaurante El Manche"
+              autoFocus value={orgName} placeholder="Ej. Restaurante La Paloma"
               onChange={(e) => setOrgName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submit()}
-              sx={inputSx} size="small" fullWidth
+              sx={inputSx} size="small" fullWidth disabled={loading}
             />
+            {error && (
+              <span style={{ fontSize: 12, color: '#e53935', marginTop: 2 }}>{error}</span>
+            )}
           </div>
 
-          <button onClick={submit} disabled={!orgName.trim()} style={{
+          <button onClick={submit} disabled={!orgName.trim() || loading} style={{
             width: '100%', padding: '10px 0', borderRadius: 10, border: 'none',
             background: accent, color: 'white',
             fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-            fontWeight: 600, fontSize: 14, cursor: orgName.trim() ? 'pointer' : 'not-allowed',
-            opacity: orgName.trim() ? 1 : 0.5,
+            fontWeight: 600, fontSize: 14,
+            cursor: orgName.trim() && !loading ? 'pointer' : 'not-allowed',
+            opacity: orgName.trim() && !loading ? 1 : 0.5,
           }}>
-            Crear organización
+            {loading ? 'Creando…' : 'Crear organización'}
           </button>
         </div>
 

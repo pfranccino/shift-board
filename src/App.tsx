@@ -272,17 +272,14 @@ export default function App() {
   // ── Auth handlers ───────────────────────────────────────────────────────
   const handleLogin = (user: MockUser) => setAuthUser(user);
 
-  const handleCreateOrg = async (orgName: string) => {
+  const handleCreateOrg = async (orgName: string): Promise<void> => {
     const newOrg: MockOrg = { id: `org_${Date.now()}`, name: orgName };
+    const owner: MockMember = { id: authUser!.id, name: authUser!.name, email: authUser!.email, role: 'owner' };
     if (isFirebaseConfigured && authUser) {
       await saveOrg(newOrg.id, newOrg);
-      await saveMembership(newOrg.id, {
-        id: authUser.id, name: authUser.name, email: authUser.email, role: 'owner',
-      });
-    } else {
-      const owner: MockMember = { id: authUser!.id, name: authUser!.name, email: authUser!.email, role: 'owner' };
-      setMembers([owner]);
+      await saveMembership(newOrg.id, owner);
     }
+    setMembers([owner]);
     setOrg(newOrg);
   };
 
