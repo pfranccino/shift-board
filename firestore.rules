@@ -19,12 +19,14 @@ service cloud.firestore {
     // ── Memberships ───────────────────────────────────────────────────────
 
     match /memberships/{membershipId} {
-      // Members can read their own memberships; owners/admins can read any within their org
       allow read: if request.auth != null &&
         (membershipId.split('_')[0] == request.auth.uid ||
          isOwnerOrAdmin(membershipId.split('_')[1]));
-      allow create: if false; // Created via Cloud Functions or server SDK only
-      allow delete: if request.auth != null && isOwnerOrAdmin(resource.data.org_id);
+      // Users can create their own owner membership when creating a new org
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.role == 'owner';
+      allow delete: if request.auth != null && isOwnerOrAdmin(resource.data.orgId);
     }
 
     // ── Invitations ───────────────────────────────────────────────────────
@@ -39,12 +41,23 @@ service cloud.firestore {
     // ── Organizations ─────────────────────────────────────────────────────
 
     match /organizations/{orgId} {
-      allow read, write: if request.auth != null && isMember(orgId);
+      // Any authenticated user can create a new org
+      allow create: if request.auth != null;
+      allow read, update, delete: if request.auth != null && isMember(orgId);
 
       // Workers
       match /workers/{workerId} {
         allow read: if request.auth != null && isMember(orgId);
         allow write: if request.auth != null && isMember(orgId);
+      }
+
+      // Members sub-collection
+      match /members/{memberId} {
+        allow read: if request.auth != null && isMember(orgId);
+        // User can create their own member document during org creation (before membership exists)
+        allow create: if request.auth != null &&
+          (memberId == request.auth.uid || isOwnerOrAdmin(orgId));
+        allow update, delete: if request.auth != null && isOwnerOrAdmin(orgId);
       }
 
       // Config (shift types, categories, coverage, solver settings)
