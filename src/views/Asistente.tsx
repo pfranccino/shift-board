@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   DAYS, ROLES, getCatIds, getCat, getShiftIds, getShift, getCoverage,
   shiftColors, statusColors, coverageSummary, weeklyHours,
   initials, avatarBg, formatWeekRange,
 } from '../data';
 import { Icon } from '../components/Icon';
-import type { Worker } from '../types';
+import { isFirebaseConfigured, fbAuth } from '../lib/firebase';
+import { useJobStatus } from '../lib/useFirestore';
+import type { Worker, SolverConfig } from '../types';
 
 interface Props {
   workers: Worker[];
@@ -13,6 +15,8 @@ interface Props {
   onApplySchedule: (assignments: Record<string, Record<string, string>>) => void;
   dark: boolean;
   goTab: (tab: string) => void;
+  orgId?: string;
+  solverConfig?: SolverConfig;
 }
 
 interface Rules {
@@ -42,6 +46,14 @@ interface ProposalItem {
   warning: string | null;
   newShifts: Record<string, string>;
 }
+
+type SolverPhase =
+  | { kind: 'idle' }
+  | { kind: 'submitting' }
+  | { kind: 'polling'; jobId: string }
+  | { kind: 'ready'; items: ProposalItem[] }
+  | { kind: 'infeasible'; reasons: InfeasibilityReason[] }
+  | { kind: 'error'; message: string };
 
 function preferredShift(worker: Worker, base: string): string {
   if (base && base !== 'auto') return base;
@@ -73,15 +85,12 @@ function pickDays(eligible: string[], n: number, mode: string): string[] {
 function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): InfeasibilityReason[] {
   const reasons: InfeasibilityReason[] = [];
 
-  // Check coverage gaps in the proposed schedule
   const merged = allWorkers.map((w) => {
     const p = proposal.find((pp) => pp.worker.id === w.id);
     return p ? { ...w, shifts: p.newShifts as Worker['shifts'] } : w;
   });
   const cov = coverageSummary(merged);
-  const covReq = getCoverage();
 
-  // Group gaps by shift
   const gapsByShift: Record<string, { count: number; min: number }[]> = {};
   cov.gaps.forEach((g) => {
     if (!gapsByShift[g.shift]) gapsByShift[g.shift] = [];
@@ -99,7 +108,6 @@ function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): In
     });
   });
 
-  // Check severe hours deficits (worker gets < 50% of contracted hours)
   proposal.forEach((p) => {
     if (p.target > 0 && p.hours < p.target * 0.5) {
       reasons.push({
@@ -111,7 +119,6 @@ function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): In
     }
   });
 
-  // Check if there are literally no workers in scope
   if (proposal.length === 0) {
     reasons.push({
       type: 'staff',
@@ -153,6 +160,29 @@ function buildProposal(workers: Worker[], rules: Rules): ProposalItem[] {
     }
     return { worker: w, pref, workDays, hours, target, diff, status, warning, newShifts };
   });
+}
+
+function buildProposalFromAssignments(
+  assignments: Record<string, Record<string, string>>,
+  allWorkers: Worker[]
+): ProposalItem[] {
+  return allWorkers
+    .filter((w) => w.id in assignments)
+    .map((w) => {
+      const newShifts: Record<string, string> = {};
+      DAYS.forEach((d) => { newShifts[d.key] = 'libre'; });
+      Object.assign(newShifts, assignments[w.id]);
+
+      const nonLibre = Object.values(newShifts).filter((s) => s && s !== 'libre');
+      const pref = nonLibre[0] ?? 'libre';
+      const sh = pref !== 'libre' ? (getShift(pref)?.hours ?? 0) : 0;
+      const workDays = nonLibre.length;
+      const hours = workDays * sh;
+      const target = w.contracted_hours;
+      const diff = hours - target;
+      const status: ProposalItem['status'] = diff === 0 ? 'exact' : diff > 0 ? 'over' : 'under';
+      return { worker: w, pref, workDays, hours, target, diff, status, warning: null, newShifts };
+    });
 }
 
 function Seg({ options, value, onChange, wrap }: { options: { key: string; label: string }[]; value: string; onChange: (k: string) => void; wrap?: boolean }) {
@@ -234,44 +264,87 @@ function WeekStrip({ shifts, dark }: { shifts: Record<string, string>; dark: boo
   );
 }
 
-export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, goTab }: Props) {
+export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, goTab, orgId, solverConfig }: Props) {
   const cats = [{ key: 'Todas', label: 'Todas' }, ...getCatIds().map((id) => ({ key: id, label: getCat(id).name }))];
   const shiftOpts = [{ key: 'auto', label: 'Automático' }, ...getShiftIds().map((id) => ({ key: id, label: getShift(id).name }))];
   const [rules, setRules] = useState<Rules>({
     scope: 'Todas', respetarMeta: true, minLibres: 2,
     incluirFinde: false, distribucion: 'compactar', turnoBase: 'auto',
   });
-  const [proposal, setProposal] = useState<ProposalItem[] | null>(null);
-  const [infeasible, setInfeasible] = useState<InfeasibilityReason[] | null>(null);
+  const [solverPhase, setSolverPhase] = useState<SolverPhase>({ kind: 'idle' });
   const set = <K extends keyof Rules>(k: K, v: Rules[K]) => setRules((r) => ({ ...r, [k]: v }));
 
   const scoped = rules.scope === 'Todas' ? workers : workers.filter((w) => w.cat === rules.scope);
 
-  const generate = () => {
-    const p = buildProposal(scoped, rules);
-    const reasons = detectInfeasibility(p, workers);
-    if (reasons.length > 0) {
-      setInfeasible(reasons);
-      setProposal(null);
-    } else {
-      setProposal(p);
-      setInfeasible(null);
+  // Firestore job polling (active only when phase is 'polling')
+  const jobStatus = useJobStatus(
+    orgId ?? '',
+    solverPhase.kind === 'polling' ? solverPhase.jobId : null
+  );
+
+  useEffect(() => {
+    if (!jobStatus) return;
+    if (jobStatus.status === 'done' && jobStatus.result) {
+      const items = buildProposalFromAssignments(jobStatus.result.assignments, workers);
+      setSolverPhase({ kind: 'ready', items });
+    } else if (jobStatus.status === 'infeasible') {
+      setSolverPhase({ kind: 'infeasible', reasons: jobStatus.infeasibility_reasons ?? [] });
+    } else if (jobStatus.status === 'error') {
+      setSolverPhase({ kind: 'error', message: jobStatus.error ?? 'Error desconocido' });
+    }
+  }, [jobStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const generate = async () => {
+    if (!isFirebaseConfigured || !fbAuth?.currentUser || !orgId) {
+      // Local fallback
+      const p = buildProposal(scoped, rules);
+      const reasons = detectInfeasibility(p, workers);
+      setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready', items: p });
+      return;
+    }
+
+    setSolverPhase({ kind: 'submitting' });
+    try {
+      const token = await fbAuth.currentUser.getIdToken();
+      const res = await fetch('/api/schedule/generate', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weekKey: selectedWeek,
+          workers: scoped.map((w) => ({
+            id: w.id,
+            name: w.name,
+            contracted_hours: w.contracted_hours,
+            unavailable_dates: (w as any).unavailable_dates ?? [],
+          })),
+          shifts: getShiftIds().map((id) => getShift(id)).filter((s) => s.hue !== null),
+          coverage: getCoverage(),
+          constraints: solverConfig ?? {},
+          boundary: {},
+        }),
+      });
+      if (!res.ok) throw new Error(`Error del servidor: ${res.status}`);
+      const { job_id } = await res.json();
+      setSolverPhase({ kind: 'polling', jobId: job_id });
+    } catch (e: any) {
+      setSolverPhase({ kind: 'error', message: e.message ?? 'Error al conectar con el solver' });
     }
   };
 
-  const discard = () => { setProposal(null); setInfeasible(null); };
+  const discard = () => setSolverPhase({ kind: 'idle' });
 
   const apply = () => {
-    if (!proposal) return;
+    if (solverPhase.kind !== 'ready') return;
     const assignments: Record<string, Record<string, string>> = {};
-    proposal.forEach((p) => { assignments[p.worker.id] = p.newShifts; });
+    solverPhase.items.forEach((p) => { assignments[p.worker.id] = p.newShifts; });
     onApplySchedule(assignments);
-    setProposal(null);
+    setSolverPhase({ kind: 'idle' });
     goTab('turnos');
   };
 
   const summary = useMemo(() => {
-    if (!proposal) return null;
+    if (solverPhase.kind !== 'ready') return null;
+    const proposal = solverPhase.items;
     const map: Record<string, Record<string, string>> = {};
     proposal.forEach((p) => { map[p.worker.id] = p.newShifts; });
     const merged = workers.map((w) => (map[w.id] ? { ...w, shifts: map[w.id] as Worker['shifts'] } : w));
@@ -281,7 +354,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
       warn: proposal.filter((p) => p.warning).length,
       cov: coverageSummary(merged),
     };
-  }, [proposal, workers]);
+  }, [solverPhase, workers]);
 
   const text3 = dark ? 'oklch(0.58 0.008 260)' : 'oklch(0.62 0.008 260)';
   const accent = '#4664c9';
@@ -296,6 +369,8 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     ...btnPrimary, background: 'transparent', color: 'var(--text-2)',
     border: '1px solid var(--border)',
   };
+
+  const isWorking = solverPhase.kind === 'submitting' || solverPhase.kind === 'polling';
 
   return (
     <div className="view-pad">
@@ -355,16 +430,57 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
               <RuleToggle label="Incluir fines de semana" hint="Permite asignar turnos en sábado y domingo." value={rules.incluirFinde} onChange={(v) => set('incluirFinde', v)} />
             </div>
 
-            <button style={{ ...btnPrimary, width: '100%', justifyContent: 'center', padding: 11, marginTop: 2 }} onClick={generate}>
-              <Icon name="magic" size={16} /> Generar propuesta
+            <button
+              style={{ ...btnPrimary, width: '100%', justifyContent: 'center', padding: 11, marginTop: 2, opacity: isWorking ? 0.6 : 1, cursor: isWorking ? 'not-allowed' : 'pointer' }}
+              onClick={generate}
+              disabled={isWorking}
+            >
+              <Icon name="magic" size={16} /> {isWorking ? 'Calculando…' : 'Generar propuesta'}
             </button>
           </div>
         </div>
 
         {/* Preview panel */}
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, boxShadow: 'var(--shadow-sm)', minHeight: 420 }}>
-          {infeasible ? (
-            /* ── Infeasibility panel ── */
+
+          {/* Loading state */}
+          {isWorking && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, height: 420, justifyContent: 'center' }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: '50%',
+                border: '3px solid var(--border)', borderTopColor: accent,
+                animation: 'spin 0.8s linear infinite',
+              }} />
+              <div style={{ fontSize: 15, fontWeight: 600 }}>
+                {solverPhase.kind === 'submitting' ? 'Enviando al solver…' : 'Calculando horario óptimo…'}
+              </div>
+              <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
+                El algoritmo está evaluando {scoped.length} trabajadores y {Object.keys(getCoverage()).length} turnos.
+                Esto puede tomar hasta 2 minutos.
+              </p>
+            </div>
+          )}
+
+          {/* Error state */}
+          {solverPhase.kind === 'error' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ width: 34, height: 34, borderRadius: 9, display: 'grid', placeItems: 'center', background: statusColors('under', dark).bg, color: statusColors('under', dark).fg, flexShrink: 0 }}>
+                    <Icon name="warn" size={18} />
+                  </span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>Error al generar el horario</div>
+                    <div style={{ fontSize: 12, color: text3, marginTop: 2 }}>{solverPhase.message}</div>
+                  </div>
+                </div>
+                <button style={btnGhost} onClick={discard}>Volver</button>
+              </div>
+            </>
+          )}
+
+          {/* Infeasibility panel */}
+          {solverPhase.kind === 'infeasible' && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -373,14 +489,14 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                   </span>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>Sin solución con las restricciones actuales</div>
-                    <div style={{ fontSize: 12, color: text3, marginTop: 2 }}>{infeasible.length} {infeasible.length === 1 ? 'conflicto detectado' : 'conflictos detectados'}</div>
+                    <div style={{ fontSize: 12, color: text3, marginTop: 2 }}>{solverPhase.reasons.length} {solverPhase.reasons.length === 1 ? 'conflicto detectado' : 'conflictos detectados'}</div>
                   </div>
                 </div>
                 <button style={btnGhost} onClick={discard}>Volver</button>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {infeasible.map((r, i) => {
+                {solverPhase.reasons.map((r, i) => {
                   const typeIcon = r.type === 'coverage' ? 'users' : r.type === 'hours' ? 'clock' : 'warn';
                   const typeBg = dark ? 'oklch(0.27 0.01 260)' : 'oklch(0.97 0.003 250)';
                   return (
@@ -403,7 +519,10 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                 })}
               </div>
             </>
-          ) : !proposal ? (
+          )}
+
+          {/* Empty state */}
+          {(solverPhase.kind === 'idle') && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 420, gap: 12, textAlign: 'center' }}>
               <span style={{ width: 56, height: 56, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'var(--surface-2)', border: '1px solid var(--border)', color: text3 }}>
                 <Icon name="magic" size={26} stroke={1.4} />
@@ -413,7 +532,10 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                 Ajustá las restricciones a la izquierda y generá una propuesta. Vas a poder revisar cada cambio antes de aplicarlo al cuadro real.
               </p>
             </div>
-          ) : (
+          )}
+
+          {/* Proposal ready */}
+          {solverPhase.kind === 'ready' && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11, fontSize: 13, color: 'var(--text-2)', flexWrap: 'wrap' }}>
@@ -432,7 +554,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {proposal.map((p) => {
+                {solverPhase.items.map((p) => {
                   const sc = statusColors(p.status, dark);
                   const sc2 = shiftColors(p.pref, dark);
                   const warnBg = `color-mix(in oklch, oklch(0.6 0.12 28) 6%, transparent)`;
@@ -446,7 +568,6 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                       onMouseEnter={(e) => { if (!p.warning) (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
                       onMouseLeave={(e) => { if (!p.warning) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                     >
-                      {/* Worker info — flex:1 para que tome el espacio sobrante */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                         <span style={{
                           width: 28, height: 28, borderRadius: 7, display: 'grid', placeItems: 'center',
@@ -465,18 +586,15 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                           </div>
                         </div>
                       </div>
-                      {/* Week strip — tamaño fijo */}
                       <div style={{ flexShrink: 0 }}>
                         <WeekStrip shifts={p.newShifts} dark={dark} />
                       </div>
-                      {/* Horas — tamaño fijo */}
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap', flexShrink: 0 }}>
                         <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11.5, color: text3 }}>{weeklyHours(p.worker)}h</span>
                         <Icon name="arrow" size={12} style={{ color: text3 }} />
                         <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 13.5, fontWeight: 600, color: sc.fg }}>{p.hours}h</span>
                         <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: text3 }}>/ {p.target}h</span>
                       </div>
-                      {/* Ícono de estado */}
                       {p.warning
                         ? <span title={p.warning} style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: 7, background: statusColors('under', dark).bg, color: statusColors('under', dark).fg }}><Icon name="warn" size={13} /></span>
                         : <span style={{ flexShrink: 0, display: 'grid', placeItems: 'center', color: sc.fg, width: 24 }}><Icon name="check" size={15} stroke={2.4} /></span>}

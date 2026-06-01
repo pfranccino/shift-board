@@ -21,6 +21,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'weekKey, workers and shifts are required' });
   }
 
+  // Rate limit: 1 active job per org at a time
+  const activeJobs = await db
+    .collection('organizations').doc(ctx.orgId)
+    .collection('jobs')
+    .where('status', 'in', ['pending', 'processing'])
+    .limit(1)
+    .get();
+
+  if (!activeJobs.empty) {
+    return res.status(429).json({ error: 'Ya hay un cálculo en progreso. Esperá a que termine antes de generar otro.' });
+  }
+
   // Create job document in Firestore
   const jobRef = db
     .collection('organizations').doc(ctx.orgId)

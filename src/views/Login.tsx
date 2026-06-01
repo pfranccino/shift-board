@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { TextField } from '@mui/material';
 import { Icon } from '../components/Icon';
+import { isFirebaseConfigured, fbAuth } from '../lib/firebase';
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  updateProfile, GoogleAuthProvider, signInWithPopup,
+} from 'firebase/auth';
 import type { MockUser } from '../types';
 
 interface Props {
@@ -11,6 +16,9 @@ interface Props {
 export function LoginView({ dark, onLogin }: Props) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
   const accent = '#4664c9';
@@ -26,19 +34,71 @@ export function LoginView({ dark, onLogin }: Props) {
     },
   };
 
-  const canSubmit = name.trim().length > 0 && email.trim().includes('@');
+  const canSubmit = isFirebaseConfigured
+    ? name.trim().length > 0 && email.trim().includes('@') && password.length >= 6
+    : name.trim().length > 0 && email.trim().includes('@');
 
-  const submit = () => {
-    if (!canSubmit) return;
-    onLogin({ id: `user_${Date.now()}`, name: name.trim(), email: email.trim().toLowerCase() });
+  const submit = async () => {
+    if (!canSubmit || loading) return;
+    setError('');
+
+    if (!isFirebaseConfigured || !fbAuth) {
+      onLogin({ id: `user_${Date.now()}`, name: name.trim(), email: email.trim().toLowerCase() });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      try {
+        await signInWithEmailAndPassword(fbAuth, email.trim(), password);
+      } catch (e: any) {
+        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-email') {
+          const cred = await createUserWithEmailAndPassword(fbAuth, email.trim(), password);
+          await updateProfile(cred.user, { displayName: name.trim() });
+        } else {
+          throw e;
+        }
+      }
+      // App.tsx se entera vía onAuthStateChanged
+    } catch (e: any) {
+      const msgs: Record<string, string> = {
+        'auth/wrong-password': 'Contraseña incorrecta.',
+        'auth/invalid-credential': 'Credenciales inválidas.',
+        'auth/email-already-in-use': 'Este correo ya está registrado.',
+        'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres.',
+        'auth/too-many-requests': 'Demasiados intentos. Esperá unos minutos.',
+      };
+      setError(msgs[e.code] ?? e.message ?? 'Error al iniciar sesión.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const loginWithGoogle = () => {
-    onLogin({
-      id: `user_${Date.now()}`,
-      name: 'Usuario Google',
-      email: `usuario${Date.now() % 1000}@gmail.com`,
-    });
+  const loginWithGoogle = async () => {
+    if (loading) return;
+    setError('');
+
+    if (!isFirebaseConfigured || !fbAuth) {
+      onLogin({
+        id: `user_${Date.now()}`,
+        name: 'Usuario Google',
+        email: `usuario${Date.now() % 1000}@gmail.com`,
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(fbAuth, provider);
+      // App.tsx se entera vía onAuthStateChanged
+    } catch (e: any) {
+      if (e.code !== 'auth/popup-closed-by-user') {
+        setError(e.message ?? 'Error con Google.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -64,7 +124,9 @@ export function LoginView({ dark, onLogin }: Props) {
 
         <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.025em', margin: '0 0 6px' }}>Iniciar sesión</h1>
         <p style={{ fontSize: 13, color: text3, margin: '0 0 24px', lineHeight: 1.5 }}>
-          Accedé a tu cuenta para gestionar los turnos de tu negocio.
+          {isFirebaseConfigured
+            ? 'Ingresá tu nombre, correo y contraseña. Si no tenés cuenta, la creamos automáticamente.'
+            : 'Accedé a tu cuenta para gestionar los turnos de tu negocio.'}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -74,7 +136,7 @@ export function LoginView({ dark, onLogin }: Props) {
               autoFocus value={name} placeholder="Ej. Ana Pérez"
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submit()}
-              sx={inputSx} size="small" fullWidth
+              sx={inputSx} size="small" fullWidth disabled={loading}
             />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -83,18 +145,41 @@ export function LoginView({ dark, onLogin }: Props) {
               type="email" value={email} placeholder="ana@negocio.com"
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && submit()}
-              sx={inputSx} size="small" fullWidth
+              sx={inputSx} size="small" fullWidth disabled={loading}
             />
           </div>
 
-          <button onClick={submit} disabled={!canSubmit} style={{
+          {isFirebaseConfigured && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Contraseña</span>
+              <TextField
+                type="password" value={password} placeholder="Mínimo 6 caracteres"
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+                sx={inputSx} size="small" fullWidth disabled={loading}
+              />
+            </div>
+          )}
+
+          {error && (
+            <div style={{
+              padding: '10px 12px', borderRadius: 9, fontSize: 12.5, lineHeight: 1.4,
+              background: 'color-mix(in oklch, oklch(0.55 0.18 27) 10%, transparent)',
+              border: '1px solid color-mix(in oklch, oklch(0.55 0.18 27) 25%, transparent)',
+              color: dark ? 'oklch(0.85 0.1 27)' : 'oklch(0.45 0.18 27)',
+            }}>
+              {error}
+            </div>
+          )}
+
+          <button onClick={submit} disabled={!canSubmit || loading} style={{
             width: '100%', padding: '10px 0', borderRadius: 10, border: 'none',
             background: accent, color: 'white',
             fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-            fontWeight: 600, fontSize: 14, cursor: canSubmit ? 'pointer' : 'not-allowed',
-            opacity: canSubmit ? 1 : 0.5, marginTop: 4,
+            fontWeight: 600, fontSize: 14, cursor: canSubmit && !loading ? 'pointer' : 'not-allowed',
+            opacity: canSubmit && !loading ? 1 : 0.5, marginTop: 4,
           }}>
-            Continuar
+            {loading ? 'Verificando…' : 'Continuar'}
           </button>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -103,15 +188,15 @@ export function LoginView({ dark, onLogin }: Props) {
             <div style={{ flex: 1, height: 1, background: border }} />
           </div>
 
-          <button onClick={loginWithGoogle} style={{
+          <button onClick={loginWithGoogle} disabled={loading} style={{
             width: '100%', padding: '9px 0', borderRadius: 10,
             border: `1px solid ${border}`, background: 'transparent',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
             fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-            fontWeight: 500, fontSize: 13.5, color: 'var(--text-1)', cursor: 'pointer',
-            transition: 'background .12s',
+            fontWeight: 500, fontSize: 13.5, color: 'var(--text-1)', cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.5 : 1, transition: 'background .12s',
           }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--hover)'; }}
+            onMouseEnter={(e) => { if (!loading) (e.currentTarget as HTMLElement).style.background = 'var(--hover)'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24">

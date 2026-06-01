@@ -6,6 +6,14 @@ import {
   DEFAULT_CONFIG, DEFAULT_SOLVER_CONFIG, INITIAL_WORKERS,
   blankShifts, getCurrentWeekKey, prevWeekKey, nextWeekKey,
 } from './data';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
+import { isFirebaseConfigured, fbAuth, fbDb } from './lib/firebase';
+import {
+  useOrgWorkers, useWeekSchedule,
+  saveWorker, updateWorker as fbUpdateWorker, deleteWorker as fbDeleteWorker,
+  saveWeekSchedule, saveOrg, saveMembership,
+} from './lib/useFirestore';
 import { Icon } from './components/Icon';
 import { TurnosView } from './views/Turnos';
 import { AsistenteView } from './views/Asistente';
@@ -56,6 +64,7 @@ html, body, #root { height: 100%; margin: 0; }
 body { font-family: "IBM Plex Sans", system-ui, sans-serif; background: var(--bg); color: var(--text-1); -webkit-font-smoothing: antialiased; font-size: 14px; letter-spacing: -0.005em; }
 @keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* App shell */
 .app-grid { display: grid; grid-template-columns: 232px 1fr; height: 100vh; overflow: hidden; }
@@ -92,24 +101,46 @@ export default function App() {
   const [tab, setTab] = useState<Tab>(() => (loadJson<string>('sb_tab', 'turnos') as Tab));
   const [config, setConfig] = useState<Config>(() => loadJson('sb_config_v2', DEFAULT_CONFIG));
   const [solverConfig, setSolverConfig] = useState<SolverConfig>(() => loadJson('sb_solver_v1', DEFAULT_SOLVER_CONFIG));
-  const [authUser, setAuthUser] = useState<MockUser | null>(() => loadJson('sb_user', null));
-  const [org, setOrg] = useState<MockOrg | null>(() => loadJson('sb_org', null));
+
+  // Auth & org state — starts null in Firebase mode, loaded from localStorage in mock mode
+  const [authUser, setAuthUser] = useState<MockUser | null>(
+    () => isFirebaseConfigured ? null : loadJson('sb_user', null)
+  );
+  const [org, setOrg] = useState<MockOrg | null>(
+    () => isFirebaseConfigured ? null : loadJson('sb_org', null)
+  );
   const [members, setMembers] = useState<MockMember[]>(() => loadJson('sb_members', []));
   const [invitations, setInvitations] = useState<MockInvitation[]>(() => loadJson('sb_invites', []));
   const [selectedWeek, setSelectedWeek] = useState<string>(() => getCurrentWeekKey());
-  const [schedules, setSchedules] = useState<WeekSchedules>(() => loadJson('sb_schedules_v1', {}));
-  const [workers, setWorkers] = useState<Worker[]>(() => {
+
+  // True while Firebase resolves the initial auth state (avoids login flash for returning users)
+  const [authLoading, setAuthLoading] = useState(isFirebaseConfigured);
+
+  // Local (mock) state — used when isFirebaseConfigured is false
+  const [localWorkers, setLocalWorkers] = useState<Worker[]>(() => {
     const raw = loadJson<any[]>('sb_workers_v2', INITIAL_WORKERS);
     return raw.map((w) => ({
       ...w,
       contracted_hours: w.contracted_hours ?? (w.role === 'part' ? 20 : 40),
     }));
   });
+  const [localSchedules, setLocalSchedules] = useState<WeekSchedules>(
+    () => loadJson('sb_schedules_v1', {})
+  );
+
+  // Firestore real-time hooks (no-ops when org.id is empty)
+  const firestoreWorkers = useOrgWorkers(org?.id ?? '');
+  const firestoreSchedules = useWeekSchedule(org?.id ?? '', selectedWeek);
+
+  // Derived — use Firestore when configured and org is loaded, else local
+  const workers: Worker[] = isFirebaseConfigured && org ? firestoreWorkers : localWorkers;
+  const schedules: WeekSchedules = isFirebaseConfigured && org ? firestoreSchedules : localSchedules;
 
   buildRegistry(config);
 
   const theme = useMemo(() => createAppTheme(dark), [dark]);
 
+  // ── Theme + UI persistence ──────────────────────────────────────────────
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     localStorage.setItem('sb_dark', JSON.stringify(dark));
@@ -118,18 +149,68 @@ export default function App() {
   useEffect(() => { localStorage.setItem('sb_tab', tab); }, [tab]);
   useEffect(() => { localStorage.setItem('sb_config_v2', JSON.stringify(config)); }, [config]);
   useEffect(() => { localStorage.setItem('sb_solver_v1', JSON.stringify(solverConfig)); }, [solverConfig]);
-  useEffect(() => { localStorage.setItem('sb_user', JSON.stringify(authUser)); }, [authUser]);
-  useEffect(() => { localStorage.setItem('sb_org', JSON.stringify(org)); }, [org]);
-  useEffect(() => { localStorage.setItem('sb_members', JSON.stringify(members)); }, [members]);
-  useEffect(() => { localStorage.setItem('sb_invites', JSON.stringify(invitations)); }, [invitations]);
-  useEffect(() => { localStorage.setItem('sb_schedules_v1', JSON.stringify(schedules)); }, [schedules]);
 
-  // Seed current week from workers.shifts on first load
+  // ── Mock-only localStorage persistence ─────────────────────────────────
   useEffect(() => {
-    setSchedules((prev) => {
+    if (!isFirebaseConfigured) localStorage.setItem('sb_user', JSON.stringify(authUser));
+  }, [authUser]);
+  useEffect(() => {
+    if (!isFirebaseConfigured) localStorage.setItem('sb_org', JSON.stringify(org));
+  }, [org]);
+  useEffect(() => {
+    if (!isFirebaseConfigured) localStorage.setItem('sb_members', JSON.stringify(members));
+  }, [members]);
+  useEffect(() => {
+    if (!isFirebaseConfigured) localStorage.setItem('sb_invites', JSON.stringify(invitations));
+  }, [invitations]);
+  useEffect(() => {
+    if (!isFirebaseConfigured) localStorage.setItem('sb_workers_v2', JSON.stringify(localWorkers));
+  }, [localWorkers]);
+  useEffect(() => {
+    if (!isFirebaseConfigured) localStorage.setItem('sb_schedules_v1', JSON.stringify(localSchedules));
+  }, [localSchedules]);
+
+  // ── Firebase Auth listener ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!isFirebaseConfigured || !fbAuth) return;
+    return onAuthStateChanged(fbAuth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setAuthUser({
+          id: firebaseUser.uid,
+          name: firebaseUser.displayName || firebaseUser.email || 'Usuario',
+          email: firebaseUser.email || '',
+        });
+        // Load user's org from Firestore memberships
+        if (fbDb) {
+          try {
+            const q = query(collection(fbDb, 'memberships'), where('userId', '==', firebaseUser.uid));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              const mem = snap.docs[0].data();
+              const orgSnap = await getDoc(doc(fbDb, `organizations/${mem.orgId}`));
+              if (orgSnap.exists()) {
+                setOrg({ id: orgSnap.id, name: orgSnap.data().name });
+              }
+            }
+          } catch {
+            // Org not found — will show onboarding
+          }
+        }
+      } else {
+        setAuthUser(null);
+        setOrg(null);
+      }
+      setAuthLoading(false);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Seed current week from workers.shifts on first load (mock mode only) ─
+  useEffect(() => {
+    if (isFirebaseConfigured) return;
+    setLocalSchedules((prev) => {
       if (prev[selectedWeek]) return prev;
       const seed: Record<string, Record<DayKey, string>> = {};
-      workers.forEach((w) => { seed[w.id] = { ...(w.shifts as Record<DayKey, string>) }; });
+      localWorkers.forEach((w) => { seed[w.id] = { ...(w.shifts as Record<DayKey, string>) }; });
       return { ...prev, [selectedWeek]: seed };
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -139,38 +220,81 @@ export default function App() {
     shifts: (schedules[selectedWeek]?.[w.id] ?? blankShifts()) as Worker['shifts'],
   }));
 
+  // ── Schedule mutations ──────────────────────────────────────────────────
   const handleAssign = (workerId: string, dayKey: string, shiftKey: string) => {
-    setSchedules((prev) => {
-      const week = prev[selectedWeek] ?? {};
-      const ws = week[workerId] ?? blankShifts();
-      return { ...prev, [selectedWeek]: { ...week, [workerId]: { ...ws, [dayKey]: shiftKey } } };
-    });
+    if (isFirebaseConfigured && org) {
+      const current = (schedules[selectedWeek]?.[workerId] ?? blankShifts()) as Record<DayKey, string>;
+      const updated = { ...current, [dayKey]: shiftKey } as Record<DayKey, string>;
+      saveWeekSchedule(org.id, selectedWeek, { [workerId]: updated });
+    } else {
+      setLocalSchedules((prev) => {
+        const week = prev[selectedWeek] ?? {};
+        const ws = week[workerId] ?? blankShifts();
+        return { ...prev, [selectedWeek]: { ...week, [workerId]: { ...ws, [dayKey]: shiftKey } } };
+      });
+    }
   };
 
   const handleApplySchedule = (assignments: Record<string, Record<DayKey, string>>) => {
-    setSchedules((prev) => ({
-      ...prev,
-      [selectedWeek]: { ...(prev[selectedWeek] ?? {}), ...assignments },
-    }));
+    if (isFirebaseConfigured && org) {
+      saveWeekSchedule(org.id, selectedWeek, assignments);
+    } else {
+      setLocalSchedules((prev) => ({
+        ...prev,
+        [selectedWeek]: { ...(prev[selectedWeek] ?? {}), ...assignments },
+      }));
+    }
   };
 
-  const appPhase: 'login' | 'onboarding' | 'app' = !authUser ? 'login' : !org ? 'onboarding' : 'app';
+  // ── Worker mutations (Firebase-aware setWorkers wrapper) ────────────────
+  const handleSetWorkers: React.Dispatch<React.SetStateAction<Worker[]>> = (update) => {
+    if (!isFirebaseConfigured || !org) {
+      setLocalWorkers(update);
+      return;
+    }
+    const prev = workers;
+    const next = typeof update === 'function' ? update(prev) : update;
+    if (next.length > prev.length) {
+      const added = next.find((w) => !prev.find((p) => p.id === w.id));
+      if (added) { const { id: _id, ...rest } = added; saveWorker(org.id, rest); }
+    } else if (next.length < prev.length) {
+      const removed = prev.find((w) => !next.find((n) => n.id === w.id));
+      if (removed) fbDeleteWorker(org.id, removed.id);
+    } else {
+      const changed = next.find((nw) => {
+        const pw = prev.find((p) => p.id === nw.id);
+        return pw && JSON.stringify(pw) !== JSON.stringify(nw);
+      });
+      if (changed) { const { id, ...rest } = changed; fbUpdateWorker(org.id, id, rest); }
+    }
+  };
 
+  // ── Auth handlers ───────────────────────────────────────────────────────
   const handleLogin = (user: MockUser) => setAuthUser(user);
 
-  const handleCreateOrg = (orgName: string) => {
+  const handleCreateOrg = async (orgName: string) => {
     const newOrg: MockOrg = { id: `org_${Date.now()}`, name: orgName };
-    const owner: MockMember = { id: authUser!.id, name: authUser!.name, email: authUser!.email, role: 'owner' };
+    if (isFirebaseConfigured && authUser) {
+      await saveOrg(newOrg.id, newOrg);
+      await saveMembership(newOrg.id, {
+        id: authUser.id, name: authUser.name, email: authUser.email, role: 'owner',
+      });
+    } else {
+      const owner: MockMember = { id: authUser!.id, name: authUser!.name, email: authUser!.email, role: 'owner' };
+      setMembers([owner]);
+    }
     setOrg(newOrg);
-    setMembers([owner]);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isFirebaseConfigured && fbAuth) await signOut(fbAuth);
     setAuthUser(null);
     setOrg(null);
     setMembers([]);
     setInvitations([]);
-    ['sb_user', 'sb_org', 'sb_members', 'sb_invites'].forEach((k) => localStorage.removeItem(k));
+    if (!isFirebaseConfigured) {
+      ['sb_user', 'sb_org', 'sb_members', 'sb_invites'].forEach((k) => localStorage.removeItem(k));
+    }
   };
 
   const handleInvite = (email: string, role: Exclude<OrgRole, 'owner'>): MockInvitation => {
@@ -179,7 +303,6 @@ export default function App() {
     setInvitations((prev) => [...prev, inv]);
     return inv;
   };
-  useEffect(() => { localStorage.setItem('sb_workers_v2', JSON.stringify(workers)); }, [workers]);
 
   const s = summarize(workers);
   const overC = statusColors('over', dark).fg;
@@ -195,12 +318,33 @@ export default function App() {
   const accentBg = dark ? `color-mix(in oklch, ${accent} 22%, transparent)` : `color-mix(in oklch, ${accent} 12%, transparent)`;
   const trackBorderStrong = dark ? 'oklch(0.40 0.012 260)' : 'oklch(0.86 0.006 250)';
 
+  const appPhase: 'loading' | 'login' | 'onboarding' | 'app' =
+    authLoading ? 'loading' :
+    !authUser ? 'login' :
+    !org ? 'onboarding' :
+    'app';
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <GlobalStyles styles={globalCss} />
+
+      {appPhase === 'loading' && (
+        <div style={{
+          minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--bg)',
+        }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: '50%',
+            border: '3px solid var(--border)', borderTopColor: accent,
+            animation: 'spin 0.8s linear infinite',
+          }} />
+        </div>
+      )}
+
       {appPhase === 'login' && <LoginView dark={dark} onLogin={handleLogin} />}
       {appPhase === 'onboarding' && <OnboardingView user={authUser!} dark={dark} onCreateOrg={handleCreateOrg} onLogout={handleLogout} />}
+
       {appPhase !== 'app' ? null : <div className="app-grid">
         {/* Sidebar */}
         <aside style={{
@@ -317,10 +461,20 @@ export default function App() {
         {/* Main */}
         <main style={{ overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg)', minWidth: 0 }}>
           {tab === 'turnos' && <TurnosView workers={displayWorkers} selectedWeek={selectedWeek} onPrevWeek={() => setSelectedWeek(prevWeekKey(selectedWeek))} onNextWeek={() => setSelectedWeek(nextWeekKey(selectedWeek))} onAssign={handleAssign} dark={dark} />}
-          {tab === 'asistente' && <AsistenteView workers={displayWorkers} selectedWeek={selectedWeek} onApplySchedule={handleApplySchedule} dark={dark} goTab={setTab} />}
-          {tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={setWorkers} dark={dark} />}
+          {tab === 'asistente' && (
+            <AsistenteView
+              workers={displayWorkers}
+              selectedWeek={selectedWeek}
+              onApplySchedule={handleApplySchedule}
+              dark={dark}
+              goTab={setTab}
+              orgId={org?.id}
+              solverConfig={solverConfig}
+            />
+          )}
+          {tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={handleSetWorkers} dark={dark} />}
           {tab === 'estadisticas' && <EstadisticasView workers={displayWorkers} dark={dark} />}
-          {tab === 'configuracion' && <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={workers} setWorkers={setWorkers} dark={dark} />}
+          {tab === 'configuracion' && <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={workers} setWorkers={handleSetWorkers} dark={dark} />}
           {tab === 'equipo' && authUser && org && (
             <EquipoView
               currentUser={authUser} org={org}

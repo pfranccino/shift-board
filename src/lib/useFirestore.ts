@@ -11,7 +11,7 @@ import type { Worker, Config, SolverConfig, MockMember, MockOrg, WeekSchedules, 
 function useCollection<T>(path: string): T[] {
   const [data, setData] = useState<T[]>([]);
   useEffect(() => {
-    if (!fbDb) return;
+    if (!fbDb || path.includes('//')) return;
     const unsub = onSnapshot(query(collection(fbDb, path)), (snap) => {
       setData(snap.docs.map((d) => ({ id: d.id, ...d.data() } as T)));
     });
@@ -23,7 +23,7 @@ function useCollection<T>(path: string): T[] {
 function useDoc<T>(path: string): T | null {
   const [data, setData] = useState<T | null>(null);
   useEffect(() => {
-    if (!fbDb) return;
+    if (!fbDb || path.includes('//')) return;
     const unsub = onSnapshot(doc(fbDb, path), (snap) => {
       setData(snap.exists() ? ({ id: snap.id, ...snap.data() } as T) : null);
     });
@@ -151,7 +151,7 @@ export function useWeekSchedule(orgId: string, weekKey: string): WeekSchedules {
   const [schedules, setSchedules] = useState<WeekSchedules>({});
 
   useEffect(() => {
-    if (!fbDb || !weekKey) return;
+    if (!fbDb || !orgId || !weekKey) return;
     const unsub = onSnapshot(
       collection(fbDb, `organizations/${orgId}/schedules/${weekKey}/assignments`),
       (snap) => {
