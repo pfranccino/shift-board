@@ -467,7 +467,7 @@ export default function App() {
               selectedWeek={selectedWeek}
               onApplySchedule={handleApplySchedule}
               dark={dark}
-              goTab={setTab}
+              goTab={(t) => setTab(t as Tab)}
               orgId={org?.id}
               solverConfig={solverConfig}
             />

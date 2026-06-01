@@ -19,7 +19,6 @@ export function createAppTheme(dark: boolean, accent = '#4664c9') {
     typography: {
       fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
       fontSize: 14,
-      letterSpacing: '-0.005em',
       h1: { fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', lineHeight: 1.2 },
       h2: { fontSize: 16, fontWeight: 600 },
       h3: { fontSize: 14, fontWeight: 600 },

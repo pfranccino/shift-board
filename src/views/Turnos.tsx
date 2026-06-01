@@ -382,7 +382,7 @@ export function TurnosView({ workers, selectedWeek, onPrevWeek, onNextWeek, onAs
       {active && (
         <ShiftPicker
           anchorEl={active.anchorEl}
-          current={workers.find((w) => w.id === active.workerId)?.shifts[active.dayKey] ?? 'libre'}
+          current={workers.find((w) => w.id === active.workerId)?.shifts[active.dayKey as keyof typeof workers[0]['shifts']] ?? 'libre'}
           dark={dark}
           onPick={(k) => assign(active.workerId, active.dayKey, k)}
           onClose={() => setActive(null)}
