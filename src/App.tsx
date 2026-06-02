@@ -185,12 +185,16 @@ export default function App() {
           email: firebaseUser.email || '',
         });
         if (fbDb) {
+          // Check superadmin independently so a membership error doesn't block it
           try {
-            const [adminSnap, memberSnap] = await Promise.all([
-              getDoc(doc(fbDb, `superadmins/${firebaseUser.uid}`)),
-              getDocs(query(collection(fbDb, 'memberships'), where('userId', '==', firebaseUser.uid))),
-            ]);
+            const adminSnap = await getDoc(doc(fbDb, `superadmins/${firebaseUser.uid}`));
             setIsSuperAdmin(adminSnap.exists());
+          } catch {
+            setIsSuperAdmin(false);
+          }
+          // Load org from memberships
+          try {
+            const memberSnap = await getDocs(query(collection(fbDb, 'memberships'), where('userId', '==', firebaseUser.uid)));
             if (!memberSnap.empty) {
               const mem = memberSnap.docs[0].data();
               const orgSnap = await getDoc(doc(fbDb, `organizations/${mem.orgId}`));
@@ -199,7 +203,7 @@ export default function App() {
               }
             }
           } catch {
-            // silently fall through to onboarding/waiting
+            // No org found
           }
         }
       } else {

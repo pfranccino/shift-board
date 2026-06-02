@@ -30,9 +30,10 @@ service cloud.firestore {
     // ── Memberships ───────────────────────────────────────────────────────
 
     match /memberships/{membershipId} {
-      allow read: if request.auth != null &&
-        (membershipId.split('_')[0] == request.auth.uid ||
-         isOwnerOrAdmin(membershipId.split('_')[1]));
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        isOwnerOrAdmin(resource.data.orgId)
+      );
       // Superadmins can create any membership.
       // Regular users can create their own (invitation acceptance).
       allow create: if request.auth != null && (
