@@ -210,7 +210,7 @@ export function LoginView({ dark, onLogin }: Props) {
         </div>
 
         <p style={{ fontSize: 11.5, color: text3, textAlign: 'center', marginTop: 24, lineHeight: 1.5 }}>
-          Al continuar aceptás los términos de uso de ShiftBoard.
+          Al continuar aceptas los términos de uso de ShiftBoard.
         </p>
       </div>
     </div>
