@@ -1,9 +1,9 @@
 import type { IncomingMessage } from 'http';
-import { auth } from './firebase-admin';
+import { auth, db } from './firebase-admin';
 
 export interface AuthContext {
   uid: string;
-  orgId: string; // for MVP: orgId === uid
+  orgId: string;
 }
 
 export async function requireAuth(req: IncomingMessage): Promise<AuthContext> {
@@ -15,5 +15,15 @@ export async function requireAuth(req: IncomingMessage): Promise<AuthContext> {
   }
 
   const decoded = await auth.verifyIdToken(token);
-  return { uid: decoded.uid, orgId: decoded.uid };
+
+  const snap = await db.collection('memberships')
+    .where('userId', '==', decoded.uid)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    throw Object.assign(new Error('Usuario sin organización asignada'), { statusCode: 403 });
+  }
+
+  return { uid: decoded.uid, orgId: snap.docs[0].data().orgId as string };
 }

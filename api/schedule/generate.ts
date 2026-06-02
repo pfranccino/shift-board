@@ -17,47 +17,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { weekKey, workers, shifts, coverage, constraints, boundary } = req.body ?? {};
 
-  if (!weekKey || !workers || !shifts) {
-    return res.status(400).json({ error: 'weekKey, workers and shifts are required' });
+  if (!weekKey || !Array.isArray(workers) || workers.length === 0) {
+    return res.status(400).json({ error: 'Se necesita al menos un trabajador para generar el horario.' });
+  }
+  if (!Array.isArray(shifts) || shifts.length === 0) {
+    return res.status(400).json({ error: 'Se necesita al menos una franja horaria configurada.' });
+  }
+  if (!SOLVER_URL) {
+    return res.status(503).json({ error: 'El solver no está configurado en este entorno.' });
   }
 
-  // Rate limit: 1 active job per org at a time
-  const activeJobs = await db
-    .collection('organizations').doc(ctx.orgId)
-    .collection('jobs')
-    .where('status', 'in', ['pending', 'processing'])
-    .limit(1)
-    .get();
+  try {
+    // Rate limit: 1 active job per org at a time
+    const activeJobs = await db
+      .collection('organizations').doc(ctx.orgId)
+      .collection('jobs')
+      .where('status', 'in', ['pending', 'processing'])
+      .limit(1)
+      .get();
 
-  if (!activeJobs.empty) {
-    return res.status(429).json({ error: 'Ya hay un cálculo en progreso. Esperá a que termine antes de generar otro.' });
+    if (!activeJobs.empty) {
+      return res.status(429).json({ error: 'Ya hay un cálculo en progreso. Espera a que termine antes de generar otro.' });
+    }
+
+    // Create job document in Firestore
+    const jobRef = db
+      .collection('organizations').doc(ctx.orgId)
+      .collection('jobs').doc();
+
+    const jobId = jobRef.id;
+
+    await jobRef.set({
+      org_id: ctx.orgId,
+      status: 'pending',
+      created_at: FieldValue.serverTimestamp(),
+      completed_at: null,
+      input: { week_key: weekKey, workers, shifts, coverage, constraints, boundary: boundary ?? {} },
+      result: null,
+      infeasibility_reasons: null,
+      error: null,
+    });
+
+    // Fire-and-forget to Cloud Run
+    fetch(`${SOLVER_URL}/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
+    }).catch(() => { /* Cloud Run will update Firestore on its own */ });
+
+    return res.status(202).json({ job_id: jobId });
+  } catch (e: any) {
+    console.error('generate error:', e);
+    return res.status(500).json({ error: 'Error interno al crear el job. Intenta nuevamente.' });
   }
-
-  // Create job document in Firestore
-  const jobRef = db
-    .collection('organizations').doc(ctx.orgId)
-    .collection('jobs').doc();
-
-  const jobId = jobRef.id;
-
-  await jobRef.set({
-    org_id: ctx.orgId,
-    status: 'pending',
-    created_at: FieldValue.serverTimestamp(),
-    completed_at: null,
-    input: { week_key: weekKey, workers, shifts, coverage, constraints, boundary: boundary ?? {} },
-    result: null,
-    infeasibility_reasons: null,
-    error: null,
-  });
-
-  // Fire-and-forget to Cloud Run — Vercel will end the function after responding
-  // Cloud Run authenticates via IAM (service account attached to Cloud Run has invoker role)
-  fetch(`${SOLVER_URL}/solve`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
-  }).catch(() => { /* Cloud Run will update Firestore on its own */ });
-
-  return res.status(202).json({ job_id: jobId });
 }

@@ -383,25 +383,32 @@ export function ConfiguracionView({ config, setConfig, solverConfig, setSolverCo
               Reglas obligatorias
             </div>
 
-            {/* Numeric: min_rest_hours */}
             {[
-              { key: 'min_rest_hours' as const, label: 'Descanso mínimo entre turnos', unit: 'horas', min: 8, max: 24 },
-              { key: 'max_consecutive_days' as const, label: 'Días máximos continuos', unit: 'días', min: 1, max: 7 },
-              { key: 'max_weekly_hours' as const, label: 'Límite de horas semanales', unit: 'horas', min: 20, max: 80 },
-            ].map(({ key, label, unit, min, max }) => (
+              { key: 'min_rest_hours' as const, label: 'Descanso mínimo entre turnos', unit: 'h', hint: 'Horas de descanso obligatorio entre dos turnos.', min: 0, max: 72 },
+              { key: 'max_consecutive_days' as const, label: 'Días máximos continuos', unit: 'd', hint: 'Máximo de días seguidos sin descanso.', min: 1, max: 60 },
+              { key: 'max_weekly_hours' as const, label: 'Límite de horas semanales', unit: 'h', hint: 'Tope de horas que puede trabajar una persona en la semana.', min: 1, max: 168 },
+            ].map(({ key, label, unit, hint, min, max }) => (
               <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', border: `1px solid ${border}`, borderRadius: 10 }}>
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
-                  <div style={{ fontSize: 11.5, color: text3, marginTop: 2 }}>mín. {min} · máx. {max}</div>
+                  <div style={{ fontSize: 11.5, color: text3, marginTop: 2, lineHeight: 1.4 }}>{hint}</div>
                 </div>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, background: surface2, border: `1px solid ${border}`, borderRadius: 8, padding: 2, flexShrink: 0 }}>
-                  <button onClick={() => setSolver(key, Math.max(min, (solverConfig[key] as number) - 1))}
-                    disabled={(solverConfig[key] as number) <= min}
-                    style={{ width: 26, height: 26, border: 'none', background: 'transparent', color: 'var(--text-2)', borderRadius: 6, cursor: (solverConfig[key] as number) <= min ? 'not-allowed' : 'pointer', fontSize: 16, display: 'grid', placeItems: 'center', opacity: (solverConfig[key] as number) <= min ? 0.35 : 1 }}>−</button>
-                  <span style={{ fontFamily: '"IBM Plex Mono"', minWidth: 42, textAlign: 'center', fontSize: 13.5, fontWeight: 600 }}>{solverConfig[key]}{unit === 'horas' ? 'h' : 'd'}</span>
-                  <button onClick={() => setSolver(key, Math.min(max, (solverConfig[key] as number) + 1))}
-                    disabled={(solverConfig[key] as number) >= max}
-                    style={{ width: 26, height: 26, border: 'none', background: 'transparent', color: 'var(--text-2)', borderRadius: 6, cursor: (solverConfig[key] as number) >= max ? 'not-allowed' : 'pointer', fontSize: 16, display: 'grid', placeItems: 'center', opacity: (solverConfig[key] as number) >= max ? 0.35 : 1 }}>+</button>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                  <input
+                    type="number" min={min} max={max}
+                    value={solverConfig[key] as number}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!isNaN(v) && v >= min && v <= max) setSolver(key, v);
+                    }}
+                    style={{
+                      width: 64, padding: '5px 8px', borderRadius: 8,
+                      border: `1px solid ${border}`, background: surface2,
+                      fontFamily: '"IBM Plex Mono"', fontSize: 14, fontWeight: 600,
+                      color: 'var(--text-1)', textAlign: 'center', outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: 12, color: text3 }}>{unit}</span>
                 </div>
               </div>
             ))}

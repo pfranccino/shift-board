@@ -9,28 +9,29 @@ interface Props {
   org: MockOrg;
   members: MockMember[];
   invitations: MockInvitation[];
-  onInvite: (email: string, role: Exclude<OrgRole, 'owner'>) => MockInvitation;
+  onInvite: (email: string, role: OrgRole) => Promise<MockInvitation>;
   onRemoveMember: (memberId: string) => void;
   onCancelInvite: (inviteId: string) => void;
+  isSuperAdmin: boolean;
   dark: boolean;
 }
 
 const ROLE_LABEL: Record<OrgRole, string> = {
   owner: 'Dueño',
   admin: 'Administrador',
-  manager: 'Mánager',
+  manager: 'Gerente',
 };
 
 const ROLE_HUE: Record<OrgRole, number> = { owner: 250, admin: 35, manager: 145 };
 
-function RoleSeg({ value, onChange }: { value: Exclude<OrgRole, 'owner'>; onChange: (r: Exclude<OrgRole, 'owner'>) => void }) {
-  const opts: Exclude<OrgRole, 'owner'>[] = ['admin', 'manager'];
+function RoleSeg({ value, onChange, allowOwner }: { value: OrgRole; onChange: (r: OrgRole) => void; allowOwner?: boolean }) {
+  const opts: OrgRole[] = allowOwner ? ['owner', 'admin', 'manager'] : ['admin', 'manager'];
   return (
     <div style={{ display: 'flex', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 9, padding: 3, gap: 2 }}>
       {opts.map((r) => {
         const on = r === value;
         return (
-          <button key={r} onClick={() => onChange(r)} style={{
+          <button key={r} onClick={() => onChange(r as OrgRole)} style={{
             flex: 1, padding: '6px 12px', border: 'none', borderRadius: 6,
             background: on ? 'var(--surface)' : 'transparent',
             color: on ? 'var(--text-1)' : 'var(--text-2)',
@@ -46,15 +47,18 @@ function RoleSeg({ value, onChange }: { value: Exclude<OrgRole, 'owner'>; onChan
   );
 }
 
-function InviteModal({ dark, onInvite, onClose }: {
+function InviteModal({ dark, onInvite, onClose, allowOwner }: {
   dark: boolean;
-  onInvite: (email: string, role: Exclude<OrgRole, 'owner'>) => MockInvitation;
+  onInvite: (email: string, role: OrgRole) => Promise<MockInvitation>;
   onClose: () => void;
+  allowOwner?: boolean;
 }) {
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<Exclude<OrgRole, 'owner'>>('manager');
+  const [role, setRole] = useState<OrgRole>('manager');
   const [generated, setGenerated] = useState<MockInvitation | null>(null);
   const [copied, setCopied] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
   const text3 = dark ? 'oklch(0.58 0.008 260)' : 'oklch(0.62 0.008 260)';
@@ -62,10 +66,18 @@ function InviteModal({ dark, onInvite, onClose }: {
 
   const inviteLink = generated ? `https://shiftboard.app/join?token=${generated.token}` : '';
 
-  const handleGenerate = () => {
-    if (!email.trim().includes('@')) return;
-    const inv = onInvite(email.trim().toLowerCase(), role);
-    setGenerated(inv);
+  const handleGenerate = async () => {
+    if (!email.trim().includes('@') || generating) return;
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const inv = await onInvite(email.trim().toLowerCase(), role);
+      setGenerated(inv);
+    } catch {
+      setGenError('No se pudo generar la invitación. Intenta nuevamente.');
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleCopy = () => {
@@ -106,10 +118,12 @@ function InviteModal({ dark, onInvite, onClose }: {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Rol</span>
-              <RoleSeg value={role} onChange={setRole} />
+              <RoleSeg value={role} onChange={setRole} allowOwner={allowOwner} />
               <div style={{ fontSize: 11.5, color: text3, lineHeight: 1.4 }}>
-                {role === 'admin'
-                  ? 'Puede invitar mánagers, editar configuración y ver todo.'
+                {role === 'owner'
+                  ? 'Control total de la organización. Puede gestionar miembros y configuración.'
+                  : role === 'admin'
+                  ? 'Puede invitar gerentes, editar configuración y ver todo.'
                   : 'Puede crear y editar turnos y trabajadores. No puede invitar.'}
               </div>
             </div>
@@ -156,20 +170,24 @@ function InviteModal({ dark, onInvite, onClose }: {
           {generated ? 'Cerrar' : 'Cancelar'}
         </button>
         {!generated && (
-          <button onClick={handleGenerate} disabled={!email.trim().includes('@')} style={{
-            padding: '8px 14px', borderRadius: 9, border: 'none', background: '#4664c9', color: 'white',
-            fontFamily: '"IBM Plex Sans"', fontWeight: 500, fontSize: 13, cursor: email.trim().includes('@') ? 'pointer' : 'not-allowed',
-            opacity: email.trim().includes('@') ? 1 : 0.5,
-          }}>
-            Generar invitación
-          </button>
+          <>
+            {genError && <span style={{ fontSize: 12, color: '#e53935' }}>{genError}</span>}
+            <button onClick={handleGenerate} disabled={!email.trim().includes('@') || generating} style={{
+              padding: '8px 14px', borderRadius: 9, border: 'none', background: '#4664c9', color: 'white',
+              fontFamily: '"IBM Plex Sans"', fontWeight: 500, fontSize: 13,
+              cursor: email.trim().includes('@') && !generating ? 'pointer' : 'not-allowed',
+              opacity: email.trim().includes('@') && !generating ? 1 : 0.5,
+            }}>
+              {generating ? 'Generando…' : 'Generar invitación'}
+            </button>
+          </>
         )}
       </DialogActions>
     </Dialog>
   );
 }
 
-export function EquipoView({ currentUser, org, members, invitations, onInvite, onRemoveMember, onCancelInvite, dark }: Props) {
+export function EquipoView({ currentUser, org, members, invitations, onInvite, onRemoveMember, onCancelInvite, isSuperAdmin, dark }: Props) {
   const [inviteModal, setInviteModal] = useState(false);
   const [confirm, setConfirm] = useState<MockMember | null>(null);
 
@@ -194,7 +212,7 @@ export function EquipoView({ currentUser, org, members, invitations, onInvite, o
             borderRadius: 9, border: 'none', background: accent, color: 'white',
             fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13, cursor: 'pointer',
           }}>
-            <Icon name="plus" size={15} stroke={2.2} /> Invitar mánager
+            <Icon name="plus" size={15} stroke={2.2} /> Invitar miembro
           </button>
         )}
       </div>
@@ -279,7 +297,7 @@ export function EquipoView({ currentUser, org, members, invitations, onInvite, o
 
       {/* Invite modal */}
       {inviteModal && (
-        <InviteModal dark={dark} onInvite={onInvite} onClose={() => setInviteModal(false)} />
+        <InviteModal dark={dark} onInvite={onInvite} onClose={() => setInviteModal(false)} allowOwner={isSuperAdmin} />
       )}
 
       {/* Confirm remove */}

@@ -4,7 +4,7 @@ import {
   serverTimestamp, query, type Unsubscribe,
 } from 'firebase/firestore';
 import { fbDb } from './firebase';
-import type { Worker, Config, SolverConfig, MockMember, MockOrg, WeekSchedules, DayKey } from '../types';
+import type { Worker, Config, SolverConfig, MockMember, MockOrg, WeekSchedules, DayKey, OrgRole } from '../types';
 
 // ── Generic Firestore collection listener ─────────────────────────────────
 
@@ -130,6 +130,20 @@ export async function saveMembership(orgId: string, member: MockMember) {
       created_at: serverTimestamp(),
     }),
   ]);
+}
+
+export async function saveInvitation(token: string, data: {
+  email: string;
+  role: OrgRole;
+  orgId: string;
+  orgName: string;
+}) {
+  if (!fbDb) throw new Error('Firestore not initialized');
+  return setDoc(doc(fbDb, `invitations/${token}`), {
+    ...data,
+    used: false,
+    created_at: serverTimestamp(),
+  });
 }
 
 export async function saveWeekSchedule(

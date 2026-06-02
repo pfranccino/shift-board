@@ -82,8 +82,10 @@ export interface MockMember {
 export interface MockInvitation {
   id: string;
   email: string;
-  role: Exclude<OrgRole, 'owner'>;
+  role: OrgRole;
   token: string;
+  orgId: string;
+  orgName: string;
   createdAt: string;
 }
 

@@ -371,6 +371,9 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
   };
 
   const isWorking = solverPhase.kind === 'submitting' || solverPhase.kind === 'polling';
+  const noWorkers = scoped.length === 0;
+  const noShifts = getShiftIds().length === 0;
+  const canGenerate = !isWorking && !noWorkers && !noShifts;
 
   return (
     <div className="view-pad">
@@ -430,10 +433,22 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
               <RuleToggle label="Incluir fines de semana" hint="Permite asignar turnos en sábado y domingo." value={rules.incluirFinde} onChange={(v) => set('incluirFinde', v)} />
             </div>
 
+            {(noWorkers || noShifts) && (
+              <div style={{
+                padding: '10px 12px', borderRadius: 9, fontSize: 12, lineHeight: 1.5,
+                background: `color-mix(in oklch, oklch(0.6 0.12 28) 8%, transparent)`,
+                border: `1px solid color-mix(in oklch, oklch(0.6 0.12 28) 22%, transparent)`,
+                color: 'oklch(0.50 0.12 28)',
+              }}>
+                {noShifts
+                  ? 'No hay franjas horarias configuradas. Ve a Configuración para agregar al menos una.'
+                  : `No hay trabajadores en el alcance "${rules.scope}". Cambia el alcance o agrega trabajadores.`}
+              </div>
+            )}
             <button
-              style={{ ...btnPrimary, width: '100%', justifyContent: 'center', padding: 11, marginTop: 2, opacity: isWorking ? 0.6 : 1, cursor: isWorking ? 'not-allowed' : 'pointer' }}
+              style={{ ...btnPrimary, width: '100%', justifyContent: 'center', padding: 11, marginTop: 2, opacity: canGenerate ? 1 : 0.5, cursor: canGenerate ? 'pointer' : 'not-allowed' }}
               onClick={generate}
-              disabled={isWorking}
+              disabled={!canGenerate}
             >
               <Icon name="magic" size={16} /> {isWorking ? 'Calculando…' : 'Generar propuesta'}
             </button>

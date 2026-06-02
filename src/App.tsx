@@ -12,7 +12,7 @@ import { isFirebaseConfigured, fbAuth, fbDb } from './lib/firebase';
 import {
   useOrgWorkers, useWeekSchedule,
   saveWorker, updateWorker as fbUpdateWorker, deleteWorker as fbDeleteWorker,
-  saveWeekSchedule, saveOrg, saveMembership,
+  saveWeekSchedule, saveOrg, saveMembership, saveInvitation,
 } from './lib/useFirestore';
 import { Icon } from './components/Icon';
 import { TurnosView } from './views/Turnos';
@@ -23,6 +23,8 @@ import { ConfiguracionView } from './views/Configuracion';
 import { EquipoView } from './views/Equipo';
 import { LoginView } from './views/Login';
 import { OnboardingView } from './views/Onboarding';
+import { WaitingView } from './views/Waiting';
+import { JoinView } from './views/Join';
 import { initials, avatarBg } from './data';
 import type { Worker, Config, SolverConfig, MockUser, MockOrg, MockMember, MockInvitation, OrgRole, WeekSchedules, DayKey } from './types';
 
@@ -111,6 +113,8 @@ export default function App() {
   );
   const [members, setMembers] = useState<MockMember[]>(() => loadJson('sb_members', []));
   const [invitations, setInvitations] = useState<MockInvitation[]>(() => loadJson('sb_invites', []));
+  const [isSuperAdmin, setIsSuperAdmin] = useState(() => !isFirebaseConfigured);
+  const [inviteToken] = useState(() => new URLSearchParams(window.location.search).get('token'));
   const [selectedWeek, setSelectedWeek] = useState<string>(() => getCurrentWeekKey());
 
   // True while Firebase resolves the initial auth state (avoids login flash for returning users)
@@ -180,25 +184,28 @@ export default function App() {
           name: firebaseUser.displayName || firebaseUser.email || 'Usuario',
           email: firebaseUser.email || '',
         });
-        // Load user's org from Firestore memberships
         if (fbDb) {
           try {
-            const q = query(collection(fbDb, 'memberships'), where('userId', '==', firebaseUser.uid));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-              const mem = snap.docs[0].data();
+            const [adminSnap, memberSnap] = await Promise.all([
+              getDoc(doc(fbDb, `superadmins/${firebaseUser.uid}`)),
+              getDocs(query(collection(fbDb, 'memberships'), where('userId', '==', firebaseUser.uid))),
+            ]);
+            setIsSuperAdmin(adminSnap.exists());
+            if (!memberSnap.empty) {
+              const mem = memberSnap.docs[0].data();
               const orgSnap = await getDoc(doc(fbDb, `organizations/${mem.orgId}`));
               if (orgSnap.exists()) {
                 setOrg({ id: orgSnap.id, name: orgSnap.data().name });
               }
             }
           } catch {
-            // Org not found — will show onboarding
+            // silently fall through to onboarding/waiting
           }
         }
       } else {
         setAuthUser(null);
         setOrg(null);
+        setIsSuperAdmin(!isFirebaseConfigured);
       }
       setAuthLoading(false);
     });
@@ -294,11 +301,32 @@ export default function App() {
     }
   };
 
-  const handleInvite = (email: string, role: Exclude<OrgRole, 'owner'>): MockInvitation => {
+  const handleInvite = async (email: string, role: OrgRole): Promise<MockInvitation> => {
     const token = Math.random().toString(36).slice(2, 10).toUpperCase();
-    const inv: MockInvitation = { id: `inv_${Date.now()}`, email, role, token, createdAt: new Date().toISOString() };
+    const inv: MockInvitation = {
+      id: `inv_${Date.now()}`, email, role, token,
+      orgId: org!.id, orgName: org!.name,
+      createdAt: new Date().toISOString(),
+    };
+    if (isFirebaseConfigured && org) {
+      await saveInvitation(token, { email, role, orgId: org.id, orgName: org.name });
+    }
     setInvitations((prev) => [...prev, inv]);
     return inv;
+  };
+
+  const handleJoinOrg = async (token: string): Promise<void> => {
+    if (!fbDb || !authUser) throw new Error('No autenticado.');
+    const invSnap = await getDoc(doc(fbDb, `invitations/${token}`));
+    if (!invSnap.exists()) throw new Error('Invitación no válida o expirada.');
+    const inv = invSnap.data();
+    const member: MockMember = { id: authUser.id, name: authUser.name, email: authUser.email, role: inv.role as OrgRole };
+    await saveMembership(inv.orgId, member);
+    const orgSnap = await getDoc(doc(fbDb, `organizations/${inv.orgId}`));
+    if (!orgSnap.exists()) throw new Error('La organización no existe.');
+    setOrg({ id: orgSnap.id, name: orgSnap.data().name });
+    setMembers([member]);
+    window.history.replaceState({}, '', window.location.pathname);
   };
 
   const s = summarize(workers);
@@ -315,11 +343,13 @@ export default function App() {
   const accentBg = dark ? `color-mix(in oklch, ${accent} 22%, transparent)` : `color-mix(in oklch, ${accent} 12%, transparent)`;
   const trackBorderStrong = dark ? 'oklch(0.40 0.012 260)' : 'oklch(0.86 0.006 250)';
 
-  const appPhase: 'loading' | 'login' | 'onboarding' | 'app' =
+  const appPhase: 'loading' | 'login' | 'waiting' | 'join' | 'onboarding' | 'app' =
     authLoading ? 'loading' :
     !authUser ? 'login' :
-    !org ? 'onboarding' :
-    'app';
+    org ? 'app' :
+    inviteToken ? 'join' :
+    isSuperAdmin ? 'onboarding' :
+    'waiting';
 
   return (
     <ThemeProvider theme={theme}>
@@ -340,6 +370,8 @@ export default function App() {
       )}
 
       {appPhase === 'login' && <LoginView dark={dark} onLogin={handleLogin} />}
+      {appPhase === 'waiting' && <WaitingView user={authUser!} dark={dark} onLogout={handleLogout} />}
+      {appPhase === 'join' && <JoinView token={inviteToken!} user={authUser!} dark={dark} onJoin={handleJoinOrg} onLogout={handleLogout} />}
       {appPhase === 'onboarding' && <OnboardingView user={authUser!} dark={dark} onCreateOrg={handleCreateOrg} onLogout={handleLogout} />}
 
       {appPhase !== 'app' ? null : <div className="app-grid">
@@ -479,6 +511,7 @@ export default function App() {
               onInvite={handleInvite}
               onRemoveMember={(id) => setMembers((prev) => prev.filter((m) => m.id !== id))}
               onCancelInvite={(id) => setInvitations((prev) => prev.filter((i) => i.id !== id))}
+              isSuperAdmin={isSuperAdmin}
               dark={dark}
             />
           )}
