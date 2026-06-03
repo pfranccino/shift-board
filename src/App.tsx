@@ -419,6 +419,23 @@ export default function App() {
     if (!validKeys.includes(tab)) setTab(validKeys[0] ?? 'turnos');
   }, [effectiveRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Superadmin sandbox org (auto-provisioned in Firestore) ────────────
+  const SANDBOX_ORG_ID = '__sandbox__';
+
+  useEffect(() => {
+    if (!isSuperAdmin || !isFirebaseConfigured || !fbDb || !authUser) return;
+    (async () => {
+      const orgSnap = await getDoc(doc(fbDb!, `organizations/${SANDBOX_ORG_ID}`));
+      if (!orgSnap.exists()) {
+        await saveOrg(SANDBOX_ORG_ID, { id: SANDBOX_ORG_ID, name: 'Sandbox (Superadmin)' });
+      }
+      const memSnap = await getDoc(doc(fbDb!, `memberships/${authUser.id}_${SANDBOX_ORG_ID}`));
+      if (!memSnap.exists()) {
+        await saveMembership(SANDBOX_ORG_ID, { id: authUser.id, name: authUser.name, email: authUser.email, role: 'owner' });
+      }
+    })().catch(console.error);
+  }, [isSuperAdmin, authUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Superadmin sandbox ─────────────────────────────────────────────────
   const seedSandbox = () => {
     const seeded = INITIAL_WORKERS.map((w) => ({ ...w }));
@@ -687,6 +704,7 @@ export default function App() {
                   dark={dark}
                   goTab={setTab}
                   solverConfig={solverConfig}
+                  orgId={SANDBOX_ORG_ID}
                 />
               </div>
             )
