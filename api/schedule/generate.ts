@@ -45,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const activeJobs = await db
       .collection('organizations').doc(ctx.orgId)
       .collection('jobs')
-      .where('status', 'in', ['pending', 'processing'])
+      .where('status', 'in', ['pending', 'running'])
       .limit(1)
       .get();
 
@@ -78,7 +78,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
       })
-    ).catch(() => { /* Cloud Run will update Firestore on its own */ });
+    ).catch((err) => {
+      console.error('Cloud Run call failed:', err);
+      db.collection('organizations').doc(ctx.orgId)
+        .collection('jobs').doc(jobId)
+        .update({ status: 'error', error: 'No se pudo contactar al solver.', completed_at: new Date() })
+        .catch(() => {});
+    });
 
     return res.status(202).json({ job_id: jobId });
   } catch (e: any) {
