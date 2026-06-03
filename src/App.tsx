@@ -47,14 +47,15 @@ const NAV: { key: Tab; label: string; icon: string }[] = [
 
 const NAV_BY_ROLE: Record<UserRole, { key: string; label: string; icon: string }[]> = {
   super: [
-    { key: 'resumen',        label: 'Resumen',              icon: 'grid' },
-    { key: 'organizaciones', label: 'Organizaciones',        icon: 'building' },
-    { key: 'usuarios',       label: 'Usuarios y roles',      icon: 'shield' },
-    { key: 'planes',         label: 'Planes y facturación',  icon: 'card' },
-    { key: 'auditoria',      label: 'Auditoría',             icon: 'list' },
-    { key: 'config',         label: 'Plantillas',            icon: 'sliders' },
-    { key: 'soporte',        label: 'Soporte',               icon: 'life' },
-    { key: 'sa_asistente',   label: 'Asistente (sandbox)',   icon: 'magic' },
+    { key: 'resumen',           label: 'Resumen',              icon: 'grid' },
+    { key: 'organizaciones',    label: 'Organizaciones',        icon: 'building' },
+    { key: 'usuarios',          label: 'Usuarios y roles',      icon: 'shield' },
+    { key: 'planes',            label: 'Planes y facturación',  icon: 'card' },
+    { key: 'auditoria',         label: 'Auditoría',             icon: 'list' },
+    { key: 'config',            label: 'Plantillas',            icon: 'sliders' },
+    { key: 'soporte',           label: 'Soporte',               icon: 'life' },
+    { key: 'sa_asistente',      label: 'Asistente (sandbox)',   icon: 'magic' },
+    { key: 'sa_configuracion',  label: 'Configuración',         icon: 'sliders' },
   ],
   admin: NAV as { key: string; label: string; icon: string }[],
   supervisor: [
@@ -689,6 +690,10 @@ export default function App() {
                 />
               </div>
             )
+          )}
+
+          {effectiveRole === 'super' && tab === 'sa_configuracion' && (
+            <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={saWorkers} setWorkers={setSaWorkers} dark={dark} />
           )}
 
           {/* ── Admin views (full existing suite) ── */}
