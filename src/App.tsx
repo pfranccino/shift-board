@@ -420,7 +420,7 @@ export default function App() {
   }, [effectiveRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Superadmin sandbox org (auto-provisioned in Firestore) ────────────
-  const SANDBOX_ORG_ID = '__sandbox__';
+  const SANDBOX_ORG_ID = 'sa-sandbox';
 
   useEffect(() => {
     if (!isSuperAdmin || !isFirebaseConfigured || !fbDb || !authUser) return;

@@ -310,6 +310,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          orgId,
           weekKey: selectedWeek,
           workers: scoped.map((w) => ({
             id: w.id,
