@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { waitUntil } from '@vercel/functions';
 import { requireAuth } from '../_lib/auth-middleware';
 import { db } from '../_lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -84,18 +85,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error: null,
     });
 
-    // Call Cloud Run immediately (token already in hand)
-    fetch(`${SOLVER_URL}/solve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
-    }).catch((err) => {
-      console.error('Cloud Run call failed:', err);
-      db.collection('organizations').doc(ctx.orgId)
-        .collection('jobs').doc(jobId)
-        .update({ status: 'error', error: 'No se pudo contactar al solver.', completed_at: new Date() })
-        .catch(() => {});
-    });
+    // waitUntil keeps the Vercel function alive until the fetch completes,
+    // preventing Vercel from freezing the background task after the response is sent.
+    waitUntil(
+      fetch(`${SOLVER_URL}/solve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
+      }).catch((err) => {
+        console.error('Cloud Run call failed:', err);
+        db.collection('organizations').doc(ctx.orgId)
+          .collection('jobs').doc(jobId)
+          .update({ status: 'error', error: 'No se pudo contactar al solver.', completed_at: new Date() })
+          .catch(() => {});
+      })
+    );
 
     return res.status(202).json({ job_id: jobId });
   } catch (e: any) {
