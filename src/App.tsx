@@ -483,9 +483,8 @@ export default function App() {
   const appPhase: 'loading' | 'public' | 'waiting' | 'join' | 'onboarding' | 'app' =
     authLoading ? 'loading' :
     !authUser ? 'public' :
-    org ? 'app' :
+    (org || isSuperAdmin) ? 'app' :
     inviteToken ? 'join' :
-    isSuperAdmin ? 'onboarding' :
     'waiting';
 
   return (
