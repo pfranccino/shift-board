@@ -22,11 +22,17 @@ import { EstadisticasView } from './views/Estadisticas';
 import { ConfiguracionView } from './views/Configuracion';
 import { EquipoView } from './views/Equipo';
 import { LoginView } from './views/Login';
+import { SignupView } from './views/Signup';
+import { PricingView } from './views/Pricing';
 import { OnboardingView } from './views/Onboarding';
 import { WaitingView } from './views/Waiting';
 import { JoinView } from './views/Join';
-import { initials, avatarBg } from './data';
-import type { Worker, Config, SolverConfig, MockUser, MockOrg, MockMember, MockInvitation, OrgRole, WeekSchedules, DayKey } from './types';
+import { SAResumen, SAOrganizaciones, SAUsuarios, SAPlanes, SAAuditoria, SAConfig, SASoporte } from './views/SuperAdmin';
+import { MgInicio, MgEquipo, MgSolicitudes, MgTurnos } from './views/Supervisor';
+import { EmSemana, EmHoras, EmCambio, EmLibre, EmDisponibilidad } from './views/Employee';
+import { initials, avatarBg, hueColors, kindColors } from './data';
+import { PLATFORM_ROLES } from './data/platform';
+import type { Worker, Config, SolverConfig, MockUser, MockOrg, MockMember, MockInvitation, OrgRole, WeekSchedules, DayKey, UserRole } from './types';
 
 type Tab = 'turnos' | 'asistente' | 'trabajadores' | 'estadisticas' | 'configuracion' | 'equipo';
 
@@ -38,6 +44,32 @@ const NAV: { key: Tab; label: string; icon: string }[] = [
   { key: 'configuracion', label: 'Configuración', icon: 'sliders' },
   { key: 'equipo', label: 'Equipo', icon: 'shield' },
 ];
+
+const NAV_BY_ROLE: Record<UserRole, { key: string; label: string; icon: string }[]> = {
+  super: [
+    { key: 'resumen',        label: 'Resumen',           icon: 'grid' },
+    { key: 'organizaciones', label: 'Organizaciones',     icon: 'building' },
+    { key: 'usuarios',       label: 'Usuarios y roles',   icon: 'shield' },
+    { key: 'planes',         label: 'Planes y facturación', icon: 'card' },
+    { key: 'auditoria',      label: 'Auditoría',          icon: 'list' },
+    { key: 'config',         label: 'Plantillas',         icon: 'sliders' },
+    { key: 'soporte',        label: 'Soporte',            icon: 'life' },
+  ],
+  admin: NAV as { key: string; label: string; icon: string }[],
+  supervisor: [
+    { key: 'inicio',       label: 'Inicio',            icon: 'home' },
+    { key: 'turnos_sup',   label: 'Turnos de mi área',  icon: 'calendar' },
+    { key: 'equipo_sup',   label: 'Mi equipo',          icon: 'users' },
+    { key: 'solicitudes',  label: 'Solicitudes',        icon: 'inbox' },
+  ],
+  empleado: [
+    { key: 'semana',         label: 'Mi semana',        icon: 'calendar' },
+    { key: 'horas',          label: 'Mis horas',        icon: 'chart' },
+    { key: 'cambio',         label: 'Solicitar cambio', icon: 'swap' },
+    { key: 'libre',          label: 'Pedir libre',      icon: 'sun' },
+    { key: 'disponibilidad', label: 'Disponibilidad',   icon: 'clock' },
+  ],
+};
 
 function loadJson<T>(key: string, fallback: T): T {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
@@ -67,9 +99,28 @@ body { font-family: "IBM Plex Sans", system-ui, sans-serif; background: var(--bg
 @keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes slidein { from { transform: translateX(20px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@keyframes toastin { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* App shell */
-.app-grid { display: grid; grid-template-columns: 232px 1fr; height: 100vh; overflow: hidden; }
+.app-grid { display: grid; grid-template-columns: 244px 1fr; height: 100vh; overflow: hidden; }
+
+/* Auth / public screens */
+.auth-layout { display: grid; grid-template-columns: 1.05fr 1fr; min-height: 100vh; }
+.auth-brand { background: var(--accent); color: white; padding: 40px 44px; display: flex; flex-direction: column; gap: 0; position: relative; overflow: hidden; }
+.auth-brand::after { content: ""; position: absolute; right: -120px; bottom: -120px; width: 360px; height: 360px; border-radius: 50%; background: oklch(1 0 0 / 0.08); }
+.auth-brand::before { content: ""; position: absolute; right: 40px; top: -80px; width: 200px; height: 200px; border-radius: 50%; background: oklch(1 0 0 / 0.06); }
+
+/* Pricing grid */
+.pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; max-width: 1020px; margin: 0 auto; padding: 0 24px; align-items: start; }
+
+@media (max-width: 1080px) {
+  .pricing-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  .auth-layout { grid-template-columns: 1fr; }
+  .auth-brand { display: none; }
+}
 
 /* Responsive layout containers */
 .asist-cols { display: grid; grid-template-columns: 350px 1fr; gap: 14px; align-items: start; }
@@ -100,9 +151,15 @@ body { font-family: "IBM Plex Sans", system-ui, sans-serif; background: var(--bg
 
 export default function App() {
   const [dark, setDark] = useState(() => loadJson<boolean>('sb_dark', false));
-  const [tab, setTab] = useState<Tab>(() => (loadJson<string>('sb_tab', 'turnos') as Tab));
+  const [tab, setTab] = useState<string>(() => loadJson<string>('sb_tab', 'turnos'));
+  const [screen, setScreen] = useState<'login' | 'signup' | 'pricing'>('login');
+  const [pendingPlan, setPendingPlan] = useState('pro');
+  // dev-only role override (only active when Firebase is not configured)
+  const [devRole, setDevRole] = useState<UserRole | null>(null);
   const [config, setConfig] = useState<Config>(() => loadJson('sb_config_v2', DEFAULT_CONFIG));
   const [solverConfig, setSolverConfig] = useState<SolverConfig>(() => loadJson('sb_solver_v1', DEFAULT_SOLVER_CONFIG));
+  // toast
+  const [toastState, setToastState] = useState<{ msg: string; kind: string; id: number } | null>(null);
 
   // Auth & org state — starts null in Firebase mode, loaded from localStorage in mock mode
   const [authUser, setAuthUser] = useState<MockUser | null>(
@@ -151,6 +208,12 @@ export default function App() {
   }, [dark]);
 
   useEffect(() => { localStorage.setItem('sb_tab', tab); }, [tab]);
+  useEffect(() => {
+    if (!toastState) return;
+    const t = setTimeout(() => setToastState(null), 2600);
+    return () => clearTimeout(t);
+  }, [toastState]);
+  const toast = (msg: string, kind = 'ok') => setToastState({ msg, kind, id: Date.now() });
   useEffect(() => { localStorage.setItem('sb_config_v2', JSON.stringify(config)); }, [config]);
   useEffect(() => { localStorage.setItem('sb_solver_v1', JSON.stringify(solverConfig)); }, [solverConfig]);
 
@@ -333,6 +396,33 @@ export default function App() {
     window.history.replaceState({}, '', window.location.pathname);
   };
 
+  // ── Role derivation ────────────────────────────────────────────────────
+  const effectiveRole: UserRole = (() => {
+    if (!isFirebaseConfigured && devRole) return devRole;
+    if (isSuperAdmin) return 'super';
+    const myMembership = members.find((m) => m.id === authUser?.id);
+    if (myMembership?.role === 'manager') return 'supervisor';
+    if (myMembership?.role === 'employee') return 'empleado';
+    return 'admin';
+  })();
+
+  // Reset tab when role changes to first valid tab for that role
+  useEffect(() => {
+    const validKeys = NAV_BY_ROLE[effectiveRole]?.map((n) => n.key) ?? [];
+    if (!validKeys.includes(tab)) setTab(validKeys[0] ?? 'turnos');
+  }, [effectiveRole]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSignup = async (user: MockUser, orgName: string) => {
+    setAuthUser(user);
+    const newOrg: MockOrg = { id: `org_${Date.now()}`, name: orgName };
+    const owner: MockMember = { id: user.id, name: user.name, email: user.email, role: 'owner' };
+    if (isFirebaseConfigured) {
+      try { await saveOrg(newOrg.id, newOrg); await saveMembership(newOrg.id, owner); } catch { /* handled by Firebase listener */ }
+    }
+    setMembers([owner]);
+    setOrg(newOrg);
+  };
+
   const s = summarize(workers);
   const overC = statusColors('over', dark).fg;
   const underC = statusColors('under', dark).fg;
@@ -347,9 +437,9 @@ export default function App() {
   const accentBg = dark ? `color-mix(in oklch, ${accent} 22%, transparent)` : `color-mix(in oklch, ${accent} 12%, transparent)`;
   const trackBorderStrong = dark ? 'oklch(0.40 0.012 260)' : 'oklch(0.86 0.006 250)';
 
-  const appPhase: 'loading' | 'login' | 'waiting' | 'join' | 'onboarding' | 'app' =
+  const appPhase: 'loading' | 'public' | 'waiting' | 'join' | 'onboarding' | 'app' =
     authLoading ? 'loading' :
-    !authUser ? 'login' :
+    !authUser ? 'public' :
     org ? 'app' :
     inviteToken ? 'join' :
     isSuperAdmin ? 'onboarding' :
@@ -373,7 +463,20 @@ export default function App() {
         </div>
       )}
 
-      {appPhase === 'login' && <LoginView dark={dark} onLogin={handleLogin} />}
+      {/* ── Public screens (not logged in) ── */}
+      {appPhase === 'public' && screen === 'login' && (
+        <LoginView dark={dark} onLogin={handleLogin}
+          goSignup={() => setScreen('signup')} goPricing={() => setScreen('pricing')} />
+      )}
+      {appPhase === 'public' && screen === 'signup' && (
+        <SignupView dark={dark} initialPlan={pendingPlan}
+          onSignup={handleSignup} goLogin={() => setScreen('login')} goPricing={() => setScreen('pricing')} />
+      )}
+      {appPhase === 'public' && screen === 'pricing' && (
+        <PricingView dark={dark} goLogin={() => setScreen('login')}
+          goSignup={(plan) => { setPendingPlan(plan); setScreen('signup'); }} />
+      )}
+
       {appPhase === 'waiting' && <WaitingView user={authUser!} dark={dark} onLogout={handleLogout} />}
       {appPhase === 'join' && <JoinView token={inviteToken!} user={authUser!} dark={dark} onJoin={handleJoinOrg} onLogout={handleLogout} />}
       {appPhase === 'onboarding' && <OnboardingView user={authUser!} dark={dark} onCreateOrg={handleCreateOrg} onLogout={handleLogout} />}
@@ -382,26 +485,37 @@ export default function App() {
         {/* Sidebar */}
         <aside style={{
           background: sidebarBg, borderRight: `1px solid ${borderColor}`,
-          display: 'flex', flexDirection: 'column', padding: '18px 14px', gap: 6,
+          display: 'flex', flexDirection: 'column', padding: '18px 14px', gap: 5,
           overflow: 'hidden',
         }}>
           {/* Brand */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px 18px' }}>
-            <span style={{
-              width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center',
-              background: accent, color: 'white', flexShrink: 0,
-            }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px 10px' }}>
+            <span style={{ width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center', background: accent, color: 'white', flexShrink: 0 }}>
               <Icon name="calendar" size={18} stroke={1.9} />
             </span>
-            <div className="sb-name" style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em', color: 'var(--text-1)', lineHeight: 1.2 }}>ShiftBoard</div>
-              {org && <div style={{ fontSize: 11, color: text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{org.name}</div>}
-            </div>
+            <span className="sb-name" style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em', color: 'var(--text-1)' }}>Turnos</span>
+          </div>
+
+          {/* Role context */}
+          <div className="sb-name" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px 12px' }}>
+            {(() => {
+              const r = PLATFORM_ROLES[effectiveRole];
+              const co = hueColors(r.hue, dark);
+              return (
+                <>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 6, background: co.bg, color: co.fg, border: `1px solid ${co.border}`, fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 99, background: co.dot, flexShrink: 0 }} />
+                    {r.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: text3 }}>{r.scope}</span>
+                </>
+              );
+            })()}
           </div>
 
           {/* Nav */}
           <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {NAV.map((n) => {
+            {NAV_BY_ROLE[effectiveRole].map((n) => {
               const on = tab === n.key;
               return (
                 <button key={n.key} onClick={() => setTab(n.key)} className="sb-nav-btn" style={{
@@ -423,44 +537,58 @@ export default function App() {
             })}
           </nav>
 
-          {/* Side stat */}
-          <div className="sb-stat" style={{
-            marginTop: 'auto', padding: 12, background: surface2,
-            border: `1px solid ${borderColor}`, borderRadius: 11,
-            display: 'flex', flexDirection: 'column', gap: 7,
-          }}>
-            {[
-              { label: 'Asignadas', val: `${s.assigned}h`, color: 'var(--text-1)' },
-              { label: 'Extra', val: `+${s.extra}h`, color: overC },
-              { label: 'Faltantes', val: `−${s.missing}h`, color: underC },
-            ].map(({ label, val, color }) => (
-              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: text2 }}>
-                <span style={{ color }}>{label}</span>
-                <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontWeight: 600, color }}>{val}</span>
+          {/* Side stat — only for admin role */}
+          {effectiveRole === 'admin' && (
+            <div className="sb-stat" style={{ marginTop: 'auto', padding: 12, background: surface2, border: `1px solid ${borderColor}`, borderRadius: 11, display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {[
+                { label: 'Asignadas', val: `${s.assigned}h`, color: 'var(--text-1)' },
+                { label: 'Extra', val: `+${s.extra}h`, color: overC },
+                { label: 'Faltantes', val: `−${s.missing}h`, color: underC },
+              ].map(({ label, val, color }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: text2 }}>
+                  <span style={{ color }}>{label}</span>
+                  <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontWeight: 600, color }}>{val}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Dev-only role switcher (only visible when Firebase is not configured) */}
+          {!isFirebaseConfigured && (
+            <div className="sb-name" style={{ marginTop: effectiveRole !== 'admin' ? 'auto' : 0, padding: '8px 4px' }}>
+              <div style={{ fontSize: 10.5, color: text3, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Vista previa de rol</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {(Object.values(PLATFORM_ROLES) as typeof PLATFORM_ROLES[keyof typeof PLATFORM_ROLES][]).map((r) => {
+                  const on = effectiveRole === r.key;
+                  const co = hueColors(r.hue, dark);
+                  return (
+                    <button key={r.key} onClick={() => setDevRole(r.key as UserRole)} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8,
+                      border: 'none', background: on ? co.bg : 'transparent', cursor: 'pointer',
+                      fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12, fontWeight: 500,
+                      color: on ? co.fg : text2, textAlign: 'left',
+                    }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 99, background: co.dot, flexShrink: 0 }} />
+                      {r.name}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
 
           {/* User info */}
           {authUser && (
-            <div style={{ paddingTop: 8, borderTop: `1px solid ${borderColor}`, marginTop: 4 }}>
+            <div style={{ paddingTop: 8, borderTop: `1px solid ${borderColor}`, marginTop: effectiveRole !== 'admin' && isFirebaseConfigured ? 'auto' : 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 4px' }}>
-                <span style={{
-                  width: 28, height: 28, borderRadius: 8, display: 'grid', placeItems: 'center',
-                  fontSize: 10, fontWeight: 600, background: avatarBg(authUser.name, dark),
-                  color: dark ? 'oklch(0.85 0.01 260)' : 'oklch(0.25 0.01 260)', flexShrink: 0,
-                }}>{initials(authUser.name)}</span>
+                <span style={{ width: 28, height: 28, borderRadius: 8, display: 'grid', placeItems: 'center', fontSize: 10, fontWeight: 600, background: avatarBg(authUser.name, dark), color: dark ? 'oklch(0.85 0.01 260)' : 'oklch(0.25 0.01 260)', flexShrink: 0 }}>{initials(authUser.name)}</span>
                 <div className="sb-name" style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUser.name}</div>
                   <div style={{ fontSize: 11, color: text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUser.email}</div>
                 </div>
-                <button onClick={handleLogout} title="Cerrar sesión" style={{
-                  width: 26, height: 26, borderRadius: 7, border: 'none', background: 'transparent',
-                  color: text3, cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0,
-                }}
+                <button onClick={handleLogout} title="Cerrar sesión" style={{ width: 26, height: 26, borderRadius: 7, border: 'none', background: 'transparent', color: text3, cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0 }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--text-1)'; (e.currentTarget as HTMLElement).style.background = 'var(--hover)'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = text3; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                >
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = text3; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}>
                   <Icon name="logout" size={14} />
                 </button>
               </div>
@@ -469,22 +597,9 @@ export default function App() {
 
           {/* Theme toggle */}
           <div style={{ paddingTop: 12 }}>
-            <button onClick={() => setDark(!dark)} style={{
-              display: 'flex', alignItems: 'center', gap: 9,
-              background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-              fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-            }}>
-              <span style={{
-                width: 38, height: 22, borderRadius: 99, position: 'relative', flexShrink: 0,
-                background: dark ? accent : trackBorderStrong,
-                transition: 'background .2s',
-              }}>
-                <span style={{
-                  position: 'absolute', top: 2, left: 2, width: 18, height: 18,
-                  borderRadius: 99, background: 'white', display: 'grid', placeItems: 'center',
-                  fontSize: 10, color: '#555', transition: 'transform .2s',
-                  transform: dark ? 'translateX(16px)' : 'none',
-                }}>{dark ? '☾' : '☀'}</span>
+            <button onClick={() => setDark(!dark)} style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none', border: 'none', cursor: 'pointer', padding: 4, fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }}>
+              <span style={{ width: 38, height: 22, borderRadius: 99, position: 'relative', flexShrink: 0, background: dark ? accent : trackBorderStrong, transition: 'background .2s' }}>
+                <span style={{ position: 'absolute', top: 2, left: 2, width: 18, height: 18, borderRadius: 99, background: 'white', display: 'grid', placeItems: 'center', fontSize: 10, color: '#555', transition: 'transform .2s', transform: dark ? 'translateX(16px)' : 'none' }}>{dark ? '☾' : '☀'}</span>
               </span>
               <span className="sb-foot-text" style={{ fontSize: 12.5, color: text2 }}>{dark ? 'Oscuro' : 'Claro'}</span>
             </button>
@@ -493,34 +608,70 @@ export default function App() {
 
         {/* Main */}
         <main style={{ overflowY: 'auto', overflowX: 'hidden', background: 'var(--bg)', minWidth: 0 }}>
-          {tab === 'turnos' && <TurnosView workers={displayWorkers} selectedWeek={selectedWeek} onPrevWeek={() => setSelectedWeek(prevWeekKey(selectedWeek))} onNextWeek={() => setSelectedWeek(nextWeekKey(selectedWeek))} onAssign={handleAssign} dark={dark} />}
-          {tab === 'asistente' && (
-            <AsistenteView
-              workers={displayWorkers}
-              selectedWeek={selectedWeek}
-              onApplySchedule={handleApplySchedule}
-              dark={dark}
-              goTab={(t) => setTab(t as Tab)}
-              orgId={org?.id}
-              solverConfig={solverConfig}
-            />
+          {/* ── Superadmin views ── */}
+          {effectiveRole === 'super' && tab === 'resumen'        && <SAResumen        dark={dark} toast={toast} />}
+          {effectiveRole === 'super' && tab === 'organizaciones' && <SAOrganizaciones  dark={dark} toast={toast} />}
+          {effectiveRole === 'super' && tab === 'usuarios'       && <SAUsuarios        dark={dark} toast={toast} />}
+          {effectiveRole === 'super' && tab === 'planes'         && <SAPlanes          dark={dark} toast={toast} />}
+          {effectiveRole === 'super' && tab === 'auditoria'      && <SAAuditoria       dark={dark} />}
+          {effectiveRole === 'super' && tab === 'config'         && <SAConfig          dark={dark} toast={toast} />}
+          {effectiveRole === 'super' && tab === 'soporte'        && <SASoporte         dark={dark} toast={toast} />}
+
+          {/* ── Admin views (full existing suite) ── */}
+          {effectiveRole === 'admin' && tab === 'turnos' && (
+            <TurnosView workers={displayWorkers} selectedWeek={selectedWeek}
+              onPrevWeek={() => setSelectedWeek(prevWeekKey(selectedWeek))}
+              onNextWeek={() => setSelectedWeek(nextWeekKey(selectedWeek))}
+              onAssign={handleAssign} dark={dark} />
           )}
-          {tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={handleSetWorkers} dark={dark} />}
-          {tab === 'estadisticas' && <EstadisticasView workers={displayWorkers} dark={dark} />}
-          {tab === 'configuracion' && <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={workers} setWorkers={handleSetWorkers} dark={dark} />}
-          {tab === 'equipo' && authUser && org && (
-            <EquipoView
-              currentUser={authUser} org={org}
-              members={members} invitations={invitations}
+          {effectiveRole === 'admin' && tab === 'asistente' && (
+            <AsistenteView workers={displayWorkers} selectedWeek={selectedWeek}
+              onApplySchedule={handleApplySchedule} dark={dark}
+              goTab={(t) => setTab(t)} orgId={org?.id} solverConfig={solverConfig} />
+          )}
+          {effectiveRole === 'admin' && tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={handleSetWorkers} dark={dark} />}
+          {effectiveRole === 'admin' && tab === 'estadisticas'  && <EstadisticasView  workers={displayWorkers} dark={dark} />}
+          {effectiveRole === 'admin' && tab === 'configuracion' && (
+            <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={workers} setWorkers={handleSetWorkers} dark={dark} />
+          )}
+          {effectiveRole === 'admin' && tab === 'equipo' && authUser && org && (
+            <EquipoView currentUser={authUser} org={org} members={members} invitations={invitations}
               onInvite={handleInvite}
               onRemoveMember={(id) => setMembers((prev) => prev.filter((m) => m.id !== id))}
               onCancelInvite={(id) => setInvitations((prev) => prev.filter((i) => i.id !== id))}
-              isSuperAdmin={isSuperAdmin}
-              dark={dark}
-            />
+              isSuperAdmin={isSuperAdmin} dark={dark} />
           )}
+
+          {/* ── Supervisor views ── */}
+          {effectiveRole === 'supervisor' && tab === 'inicio'      && <MgInicio      dark={dark} role={effectiveRole} toast={toast} goTab={setTab} />}
+          {effectiveRole === 'supervisor' && tab === 'turnos_sup'  && <MgTurnos      dark={dark} role={effectiveRole} goTab={setTab} />}
+          {effectiveRole === 'supervisor' && tab === 'equipo_sup'  && <MgEquipo      dark={dark} role={effectiveRole} toast={toast} />}
+          {effectiveRole === 'supervisor' && tab === 'solicitudes' && <MgSolicitudes dark={dark} role={effectiveRole} toast={toast} />}
+
+          {/* ── Employee views ── */}
+          {effectiveRole === 'empleado' && tab === 'semana'         && <EmSemana         dark={dark} toast={toast} goTab={setTab} />}
+          {effectiveRole === 'empleado' && tab === 'horas'          && <EmHoras          dark={dark} />}
+          {effectiveRole === 'empleado' && tab === 'cambio'         && <EmCambio         dark={dark} toast={toast} goTab={setTab} />}
+          {effectiveRole === 'empleado' && tab === 'libre'          && <EmLibre          dark={dark} toast={toast} goTab={setTab} />}
+          {effectiveRole === 'empleado' && tab === 'disponibilidad' && <EmDisponibilidad dark={dark} toast={toast} />}
         </main>
       </div>}
+
+      {/* Global toast */}
+      {toastState && (
+        <div style={{
+          position: 'fixed', bottom: 22, left: '50%', transform: 'translateX(-50%)', zIndex: 400,
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 11,
+          boxShadow: 'var(--shadow-lg)', padding: '11px 16px',
+          display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, fontWeight: 500,
+          animation: 'toastin .25s ease-out', whiteSpace: 'nowrap',
+        }}>
+          <span style={{ color: kindColors(toastState.kind, dark).fg, display: 'grid', placeItems: 'center' }}>
+            <Icon name={toastState.kind === 'bad' ? 'warn' : 'check'} size={15} stroke={2.2} />
+          </span>
+          {toastState.msg}
+        </div>
+      )}
     </ThemeProvider>
   );
 }

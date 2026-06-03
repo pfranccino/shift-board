@@ -32,6 +32,22 @@ const paths: Record<string, React.ReactNode> = {
   mail: <><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M3 6l9 7 9-7" /></>,
   copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
   logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></>,
+  building: <><path d="M5 21V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v16" /><path d="M14 9h4a1 1 0 0 1 1 1v11" /><path d="M3 21h18M8 8h2M8 12h2M8 16h2" /></>,
+  grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" /></>,
+  home: <><path d="M4 11l8-7 8 7" /><path d="M6 9.5V20h12V9.5" /><path d="M10 20v-5h4v5" /></>,
+  inbox: <><path d="M3 13h5l1.5 2.5h5L16 13h5" /><path d="M5 5h14l2 8v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5z" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" /></>,
+  swap: <><path d="M7 7h11l-3-3M17 17H6l3 3" /></>,
+  lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></>,
+  trend: <><path d="M3 17l6-6 4 4 8-8" /><path d="M21 7h-5M21 7v5" /></>,
+  dollar: <><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.8 7 7s2.5 3 5 3.5 5 1.3 5 3.5-2.2 3.5-5 3.5-5-1.1-5-3" /></>,
+  bolt: <path d="M13 2L4 14h7l-1 8 9-12h-7z" />,
+  ban: <><circle cx="12" cy="12" r="9" /><path d="M6 6l12 12" /></>,
+  star: <path d="M12 3l2.6 6.3 6.4.5-4.9 4.2 1.5 6.5L12 17.6 6.9 20.5l1.5-6.5L3.5 9.8l6.4-.5z" />,
+  card: <><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M3 9.5h18M7 15h4" /></>,
+  list: <><path d="M8 6h13M8 12h13M8 18h13" /><circle cx="3.8" cy="6" r="1.1" fill="currentColor" stroke="none" /><circle cx="3.8" cy="12" r="1.1" fill="currentColor" stroke="none" /><circle cx="3.8" cy="18" r="1.1" fill="currentColor" stroke="none" /></>,
+  life: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.3" /><path d="M5.5 5.5l3.8 3.8M14.7 14.7l3.8 3.8M18.5 5.5l-3.8 3.8M9.3 14.7l-3.8 3.8" /></>,
 };
 
 export function Icon({ name, size = 16, stroke = 1.6, style }: IconProps) {

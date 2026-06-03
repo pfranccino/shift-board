@@ -20,12 +20,13 @@ const ROLE_LABEL: Record<OrgRole, string> = {
   owner: 'Dueño',
   admin: 'Administrador',
   manager: 'Gerente',
+  employee: 'Empleado',
 };
 
-const ROLE_HUE: Record<OrgRole, number> = { owner: 250, admin: 35, manager: 145 };
+const ROLE_HUE: Record<OrgRole, number> = { owner: 250, admin: 35, manager: 145, employee: 145 };
 
 function RoleSeg({ value, onChange, allowOwner }: { value: OrgRole; onChange: (r: OrgRole) => void; allowOwner?: boolean }) {
-  const opts: OrgRole[] = allowOwner ? ['owner', 'admin', 'manager'] : ['admin', 'manager'];
+  const opts: OrgRole[] = allowOwner ? ['owner', 'admin', 'manager', 'employee'] : ['admin', 'manager', 'employee'];
   return (
     <div style={{ display: 'flex', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 9, padding: 3, gap: 2 }}>
       {opts.map((r) => {

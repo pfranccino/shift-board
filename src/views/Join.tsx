@@ -23,6 +23,7 @@ const ROLE_LABEL: Record<OrgRole, string> = {
   owner: 'Dueño',
   admin: 'Administrador',
   manager: 'Gerente',
+  employee: 'Empleado',
 };
 
 export function JoinView({ token, user, dark, onJoin, onLogout }: Props) {

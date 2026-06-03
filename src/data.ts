@@ -164,6 +164,19 @@ export function statusColors(status: ComplianceStatus, dark: boolean): HueColors
   return hueColors(map[status], dark);
 }
 
+/** Maps platform status kinds (ok/warn/bad/info/neutral) to hueColors. */
+export function kindColors(kind: string, dark: boolean): HueColors {
+  const map: Record<string, number> = { ok: 155, warn: 75, bad: 28, info: 250, neutral: 250 };
+  return hueColors(map[kind] ?? 250, dark);
+}
+
+/** Stable name → hue for avatars (same algorithm as handoff). */
+export function nameHue(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return h;
+}
+
 // ---- Calculations ----
 export function weeklyHours(worker: Worker): number {
   return DAYS.reduce((sum, d) => sum + getShift(worker.shifts[d.key]).hours, 0);

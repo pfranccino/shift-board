@@ -59,7 +59,50 @@ export interface SolverConfig {
 
 export type WeekSchedules = Record<string, Record<string, Record<DayKey, string>>>;
 
-export type OrgRole = 'owner' | 'admin' | 'manager';
+export type OrgRole = 'owner' | 'admin' | 'manager' | 'employee';
+
+// ─── Platform / multi-role ─────────────────────────────────────────────────
+export type UserRole = 'super' | 'admin' | 'supervisor' | 'empleado';
+
+export interface PlatformOrg {
+  id: string; name: string; type: string; plan: string;
+  status: 'active' | 'trial' | 'suspended';
+  users: number; sucursales: number; mrr: number; usagePct: number;
+  owner: string; since: string; country: string;
+}
+
+export interface PlatformPlan {
+  id: string; name: string; price: number | null; period: string;
+  tagline: string; popular?: boolean;
+  limits: { users: number; sucursales: number };
+  features: string[]; notIncluded: string[];
+}
+
+export interface PlatformUser {
+  id: string; name: string; email: string; org: string;
+  role: string; status: 'active' | 'invited' | 'suspended';
+  last: string; twofa: boolean;
+}
+
+export interface ShiftRequest {
+  id: string; who: string; type: 'swap' | 'timeoff' | 'availability';
+  title: string; detail: string; day: string;
+  status: 'pending' | 'approved' | 'rejected'; when: string; area: string;
+}
+
+export interface AuditEvent {
+  id: string; time: string; date: string; user: string; role: string;
+  action: string; target: string; kind: string;
+}
+
+export interface PlatformService {
+  id: string; name: string; status: 'ok' | 'degraded' | 'down'; uptime: string;
+}
+
+export interface SupportTicket {
+  id: string; org: string; subject: string;
+  priority: 'alta' | 'media' | 'baja'; status: string; age: string;
+}
 
 export interface MockUser {
   id: string;
