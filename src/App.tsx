@@ -363,6 +363,7 @@ export default function App() {
     setOrg(null);
     setMembers([]);
     setInvitations([]);
+    setScreen('login');
     if (!isFirebaseConfigured) {
       ['sb_user', 'sb_org', 'sb_members', 'sb_invites'].forEach((k) => localStorage.removeItem(k));
     }

@@ -103,7 +103,7 @@ export function LoginView({ dark, onLogin, goSignup, goPricing }: Props) {
             Tu equipo, en orden.
           </h2>
           <p style={{ fontSize: 15, lineHeight: 1.6, color: 'oklch(1 0 0 / 0.85)', margin: '16px 0 0' }}>
-            Asigná turnos, controlá cobertura y horas, y dejá que cada rol vea exactamente lo que necesita.
+            Asigna turnos, controla cobertura y horas, y permite que cada rol vea exactamente lo que necesita.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 26 }}>
             {Object.values(PLATFORM_ROLES).map((r) => {
@@ -134,7 +134,7 @@ export function LoginView({ dark, onLogin, goSignup, goPricing }: Props) {
         <form onSubmit={submit} style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 15 }}>
           <div>
             <h1 style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Iniciar sesión</h1>
-            <p style={{ fontSize: 13.5, color: text3, margin: '6px 0 0' }}>Ingresá a tu espacio de trabajo.</p>
+            <p style={{ fontSize: 13.5, color: text3, margin: '6px 0 0' }}>Ingresa a tu espacio de trabajo.</p>
           </div>
 
           {/* Email */}
@@ -234,7 +234,7 @@ export function LoginView({ dark, onLogin, goSignup, goPricing }: Props) {
           </button>
 
           <p style={{ fontSize: 12.5, color: text3, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap', margin: 0 }}>
-            <span>¿No tenés cuenta?</span>
+            <span>¿No tienes cuenta?</span>
             <a href="#" onClick={(e) => { e.preventDefault(); goSignup(); }} style={{ color: accent, fontWeight: 500, textDecoration: 'none' }}>Crear una cuenta</a>
             <span style={{ width: 3, height: 3, borderRadius: 99, background: text3, display: 'inline-block' }} />
             <a href="#" onClick={(e) => { e.preventDefault(); goPricing(); }} style={{ color: accent, fontWeight: 500, textDecoration: 'none' }}>Ver planes</a>

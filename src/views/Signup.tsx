@@ -39,7 +39,11 @@ export function SignupView({ dark, initialPlan, onSignup, goLogin, goPricing }: 
 
   const handleStep1 = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!org.trim() || !name.trim() || !email.includes('@') || pass.length < 8) return;
+    if (!org.trim()) { setError('Escribe el nombre de tu organización.'); return; }
+    if (!name.trim()) { setError('Escribe tu nombre.'); return; }
+    if (!email.includes('@')) { setError('Ingresa un correo válido.'); return; }
+    if (pass.length < 6) { setError('La contraseña debe tener al menos 6 caracteres.'); return; }
+    setError('');
     setStep(2);
   };
 
@@ -67,7 +71,7 @@ export function SignupView({ dark, initialPlan, onSignup, goLogin, goPricing }: 
     }
   };
 
-  const steps = ['Datos de la cuenta', 'Elegí un plan', 'Listo para usar'];
+  const steps = ['Datos de la cuenta', 'Elige un plan', 'Listo para usar'];
 
   return (
     <div className="auth-layout">
@@ -119,14 +123,14 @@ export function SignupView({ dark, initialPlan, onSignup, goLogin, goPricing }: 
           <form onSubmit={handleStep1} style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 15 }}>
             <div>
               <h1 style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Crear cuenta</h1>
-              <p style={{ fontSize: 13.5, color: text3, margin: '6px 0 0' }}>Vas a ser el administrador de tu organización.</p>
+              <p style={{ fontSize: 13.5, color: text3, margin: '6px 0 0' }}>Serás el administrador de tu organización.</p>
             </div>
 
             {[
               { label: 'Nombre de la organización', icon: 'building', value: org, set: setOrg, ph: 'Mi empresa S.A.', type: 'text' },
               { label: 'Tu nombre', icon: 'users', value: name, set: setName, ph: 'Nombre y apellido', type: 'text' },
               { label: 'Email de trabajo', icon: 'mail', value: email, set: setEmail, ph: 'tu@empresa.com', type: 'email' },
-              { label: 'Contraseña', icon: 'lock', value: pass, set: setPass, ph: 'Mínimo 8 caracteres', type: 'password' },
+              { label: 'Contraseña', icon: 'lock', value: pass, set: setPass, ph: 'Mínimo 6 caracteres', type: 'password' },
             ].map(({ label, icon, value, set, ph, type }) => (
               <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 <span style={{ fontSize: 12, fontWeight: 500, color: text2 }}>{label}</span>
@@ -160,7 +164,7 @@ export function SignupView({ dark, initialPlan, onSignup, goLogin, goPricing }: 
             </button>
 
             <p style={{ fontSize: 12.5, color: text3, textAlign: 'center', margin: 0 }}>
-              ¿Ya tenés cuenta?{' '}
+              ¿Ya tienes cuenta?{' '}
               <a href="#" onClick={(e) => { e.preventDefault(); goLogin(); }} style={{ color: accent, fontWeight: 500, textDecoration: 'none' }}>Iniciar sesión</a>
             </p>
           </form>
@@ -171,8 +175,8 @@ export function SignupView({ dark, initialPlan, onSignup, goLogin, goPricing }: 
             </button>
 
             <div>
-              <h1 style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Elegí un plan</h1>
-              <p style={{ fontSize: 13.5, color: text3, margin: '6px 0 0' }}>Podés cambiarlo cuando quieras. La prueba dura 14 días.</p>
+              <h1 style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Elige un plan</h1>
+              <p style={{ fontSize: 13.5, color: text3, margin: '6px 0 0' }}>Puedes cambiarlo cuando quieras. La prueba dura 14 días.</p>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

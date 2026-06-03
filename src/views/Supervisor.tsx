@@ -168,7 +168,7 @@ export function MgInicio({ dark, role, toast, goTab }: { dark: boolean; role: Us
       {under > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, padding: '13px 16px', borderRadius: 12, background: `color-mix(in oklch, oklch(0.7 0.12 75) 10%, var(--surface))`, border: `1px solid color-mix(in oklch, oklch(0.7 0.12 75) 28%, transparent)`, fontSize: 13, color: 'var(--text-2)' }}>
           <Icon name="warn" size={16} style={{ color: kindColors('warn', dark).fg }} />
-          <span><b>{under}</b> trabajador{under > 1 ? 'es' : ''} por debajo de su meta de horas. Revisá el cuadro.</span>
+          <span><b>{under}</b> trabajador{under > 1 ? 'es' : ''} por debajo de su meta de horas. Revisa el cuadro.</span>
         </div>
       )}
     </div>

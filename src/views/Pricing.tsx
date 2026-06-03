@@ -53,7 +53,7 @@ export function PricingView({ dark, goLogin, goSignup }: Props) {
           Un precio por organización, sin sorpresas.
         </h1>
         <p style={{ fontSize: 15, color: text2, lineHeight: 1.6, margin: '0 auto', maxWidth: 520 }}>
-          Elegí según el tamaño de tu operación. Todos los planes incluyen el cuadro de turnos, control de cobertura y actualizaciones.
+          Elige según el tamaño de tu operación. Todos los planes incluyen el cuadro de turnos, control de cobertura y actualizaciones.
         </p>
         {/* Billing toggle */}
         <div style={{ marginTop: 26, display: 'flex', justifyContent: 'center' }}>
@@ -139,7 +139,7 @@ export function PricingView({ dark, goLogin, goSignup }: Props) {
       </div>
 
       <p style={{ textAlign: 'center', fontSize: 13, color: text3, margin: '40px auto 0', maxWidth: 520 }}>
-        ¿Necesitás algo distinto?{' '}
+        ¿Necesitas algo distinto?{' '}
         <a href="#" onClick={(e) => { e.preventDefault(); goSignup('enterprise'); }} style={{ color: accent, fontWeight: 500, textDecoration: 'none' }}>Hablemos</a>
         {' '}sobre un plan a medida para tu cadena.
       </p>

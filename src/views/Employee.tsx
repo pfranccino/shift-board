@@ -283,7 +283,7 @@ export function EmCambio({ dark, toast, goTab }: { dark: boolean; toast: (msg: s
       <Card pad={20}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>¿Qué día querés cambiar?</span>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>¿Qué día quieres cambiar?</span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {workDays.map((d) => {
                 const s = SHIFT_DEFS[me.shifts[d.key]];
@@ -319,7 +319,7 @@ export function EmCambio({ dark, toast, goTab }: { dark: boolean; toast: (msg: s
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Nota (opcional)</span>
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Contale a tu supervisor el motivo…" style={{ ...inputStyle, resize: 'vertical', fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }} />
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Cuéntale a tu supervisor el motivo…" style={{ ...inputStyle, resize: 'vertical', fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }} />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, marginTop: 4 }}>
             <button onClick={() => goTab('semana')} style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>Cancelar</button>
@@ -381,7 +381,7 @@ export function EmLibre({ dark, toast, goTab }: { dark: boolean; toast: (msg: st
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 14px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-2)' }}>
             <Icon name="clock" size={15} />
-            <span>Tenés <b>9 días</b> disponibles este año. Esta solicitud descontaría del saldo si se aprueba.</span>
+            <span>Tienes <b>9 días</b> disponibles este año. Esta solicitud descontaría del saldo si se aprueba.</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, marginTop: 4 }}>
             <button onClick={() => goTab('semana')} style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>Cancelar</button>
@@ -404,7 +404,7 @@ export function EmDisponibilidad({ dark, toast }: { dark: boolean; toast: (msg: 
 
   return (
     <div className="view-pad" style={{ maxWidth: 720 }}>
-      <ViewHead title="Mi disponibilidad" sub="Indicá qué días podés trabajar. Tu supervisor lo tendrá en cuenta al armar turnos." />
+      <ViewHead title="Mi disponibilidad" sub="Indica qué días puedes trabajar. Tu supervisor lo tendrá en cuenta al armar los turnos." />
       <Card pad={20}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {DAYS.map((d) => (
