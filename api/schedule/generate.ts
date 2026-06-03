@@ -41,6 +41,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // Fetch Cloud Run token early (in parallel with rate limit check) to minimize
+    // the window where the job sits in 'pending' before Cloud Run is called.
+    const tokenPromise = getCloudRunToken(SOLVER_URL);
+
     // Rate limit: 1 active job per org at a time
     const activeJobs = await db
       .collection('organizations').doc(ctx.orgId)
@@ -60,6 +64,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const jobId = jobRef.id;
 
+    // Await token now — by the time job creation finishes it's usually ready
+    let token: string;
+    try {
+      token = await tokenPromise;
+    } catch (err) {
+      console.error('Cloud Run token error:', err);
+      return res.status(503).json({ error: 'El solver no está disponible temporalmente.' });
+    }
+
     await jobRef.set({
       org_id: ctx.orgId,
       status: 'pending',
@@ -71,14 +84,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error: null,
     });
 
-    // Fire-and-forget to Cloud Run (authenticated with service account)
-    getCloudRunToken(SOLVER_URL).then((token) =>
-      fetch(`${SOLVER_URL}/solve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
-      })
-    ).catch((err) => {
+    // Call Cloud Run immediately (token already in hand)
+    fetch(`${SOLVER_URL}/solve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
+    }).catch((err) => {
       console.error('Cloud Run call failed:', err);
       db.collection('organizations').doc(ctx.orgId)
         .collection('jobs').doc(jobId)
