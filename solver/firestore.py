@@ -21,4 +21,4 @@ def get_job(org_id: str, job_id: str) -> dict:
 
 def update_job(org_id: str, job_id: str, data: dict):
     db = get_db()
-    db.collection('organizations').document(org_id).collection('jobs').document(job_id).update(data)
+    db.collection('organizations').document(org_id).collection('jobs').document(job_id).set(data, merge=True)
