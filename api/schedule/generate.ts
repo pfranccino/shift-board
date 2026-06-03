@@ -2,8 +2,21 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from '../_lib/auth-middleware';
 import { db } from '../_lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { GoogleAuth } from 'google-auth-library';
 
 const SOLVER_URL = process.env.CLOUD_RUN_SOLVER_URL!;
+
+async function getCloudRunToken(targetUrl: string): Promise<string> {
+  const gauth = new GoogleAuth({
+    credentials: {
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
+  });
+  const client = await gauth.getIdTokenClient(targetUrl);
+  const headers = await client.getRequestHeaders();
+  return (headers['Authorization'] as string).replace('Bearer ', '');
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -58,12 +71,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error: null,
     });
 
-    // Fire-and-forget to Cloud Run
-    fetch(`${SOLVER_URL}/solve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
-    }).catch(() => { /* Cloud Run will update Firestore on its own */ });
+    // Fire-and-forget to Cloud Run (authenticated with service account)
+    getCloudRunToken(SOLVER_URL).then((token) =>
+      fetch(`${SOLVER_URL}/solve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ job_id: jobId, org_id: ctx.orgId }),
+      })
+    ).catch(() => { /* Cloud Run will update Firestore on its own */ });
 
     return res.status(202).json({ job_id: jobId });
   } catch (e: any) {
