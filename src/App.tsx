@@ -480,7 +480,7 @@ export default function App() {
   const accentBg = dark ? `color-mix(in oklch, ${accent} 22%, transparent)` : `color-mix(in oklch, ${accent} 12%, transparent)`;
   const trackBorderStrong = dark ? 'oklch(0.40 0.012 260)' : 'oklch(0.86 0.006 250)';
 
-  const appPhase: 'loading' | 'public' | 'waiting' | 'join' | 'onboarding' | 'app' =
+  const appPhase: 'loading' | 'public' | 'waiting' | 'join' | 'app' =
     authLoading ? 'loading' :
     !authUser ? 'public' :
     (org || isSuperAdmin) ? 'app' :
@@ -521,7 +521,7 @@ export default function App() {
 
       {appPhase === 'waiting' && <WaitingView user={authUser!} dark={dark} onLogout={handleLogout} />}
       {appPhase === 'join' && <JoinView token={inviteToken!} user={authUser!} dark={dark} onJoin={handleJoinOrg} onLogout={handleLogout} />}
-      {appPhase === 'onboarding' && <OnboardingView user={authUser!} dark={dark} onCreateOrg={handleCreateOrg} onLogout={handleLogout} />}
+
 
       {appPhase !== 'app' ? null : <div className="app-grid">
         {/* Sidebar */}
