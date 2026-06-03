@@ -47,13 +47,14 @@ const NAV: { key: Tab; label: string; icon: string }[] = [
 
 const NAV_BY_ROLE: Record<UserRole, { key: string; label: string; icon: string }[]> = {
   super: [
-    { key: 'resumen',        label: 'Resumen',           icon: 'grid' },
-    { key: 'organizaciones', label: 'Organizaciones',     icon: 'building' },
-    { key: 'usuarios',       label: 'Usuarios y roles',   icon: 'shield' },
-    { key: 'planes',         label: 'Planes y facturación', icon: 'card' },
-    { key: 'auditoria',      label: 'Auditoría',          icon: 'list' },
-    { key: 'config',         label: 'Plantillas',         icon: 'sliders' },
-    { key: 'soporte',        label: 'Soporte',            icon: 'life' },
+    { key: 'resumen',        label: 'Resumen',              icon: 'grid' },
+    { key: 'organizaciones', label: 'Organizaciones',        icon: 'building' },
+    { key: 'usuarios',       label: 'Usuarios y roles',      icon: 'shield' },
+    { key: 'planes',         label: 'Planes y facturación',  icon: 'card' },
+    { key: 'auditoria',      label: 'Auditoría',             icon: 'list' },
+    { key: 'config',         label: 'Plantillas',            icon: 'sliders' },
+    { key: 'soporte',        label: 'Soporte',               icon: 'life' },
+    { key: 'sa_asistente',   label: 'Asistente (sandbox)',   icon: 'magic' },
   ],
   admin: NAV as { key: string; label: string; icon: string }[],
   supervisor: [
@@ -156,6 +157,10 @@ export default function App() {
   const [pendingPlan, setPendingPlan] = useState('pro');
   // dev-only role override (only active when Firebase is not configured)
   const [devRole, setDevRole] = useState<UserRole | null>(null);
+  // superadmin sandbox — isolated workers/schedules for testing the Asistente
+  const [saWorkers, setSaWorkers] = useState<Worker[]>([]);
+  const [saSchedules, setSaSchedules] = useState<WeekSchedules>({});
+  const [saWeek, setSaWeek] = useState<string>(() => getCurrentWeekKey());
   const [config, setConfig] = useState<Config>(() => loadJson('sb_config_v2', DEFAULT_CONFIG));
   const [solverConfig, setSolverConfig] = useState<SolverConfig>(() => loadJson('sb_solver_v1', DEFAULT_SOLVER_CONFIG));
   // toast
@@ -413,6 +418,25 @@ export default function App() {
     if (!validKeys.includes(tab)) setTab(validKeys[0] ?? 'turnos');
   }, [effectiveRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Superadmin sandbox ─────────────────────────────────────────────────
+  const seedSandbox = () => {
+    const seeded = INITIAL_WORKERS.map((w) => ({ ...w }));
+    setSaWorkers(seeded);
+    // Start with a blank schedule so the Asistente proposes from scratch
+    const blank: Record<string, Record<DayKey, string>> = {};
+    seeded.forEach((w) => { blank[w.id] = blankShifts() as Record<DayKey, string>; });
+    setSaSchedules({ [saWeek]: blank });
+  };
+
+  const handleSaApply = (assignments: Record<string, Record<DayKey, string>>) => {
+    setSaSchedules((prev) => ({ ...prev, [saWeek]: { ...(prev[saWeek] ?? {}), ...assignments } }));
+  };
+
+  const saDisplayWorkers = saWorkers.map((w) => ({
+    ...w,
+    shifts: (saSchedules[saWeek]?.[w.id] ?? blankShifts()) as Worker['shifts'],
+  }));
+
   const handleSignup = async (user: MockUser, orgName: string) => {
     setAuthUser(user);
     const newOrg: MockOrg = { id: `org_${Date.now()}`, name: orgName };
@@ -617,6 +641,55 @@ export default function App() {
           {effectiveRole === 'super' && tab === 'auditoria'      && <SAAuditoria       dark={dark} />}
           {effectiveRole === 'super' && tab === 'config'         && <SAConfig          dark={dark} toast={toast} />}
           {effectiveRole === 'super' && tab === 'soporte'        && <SASoporte         dark={dark} toast={toast} />}
+          {effectiveRole === 'super' && tab === 'sa_asistente'  && (
+            saWorkers.length === 0 ? (
+              <div className="view-pad">
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 22 }}>
+                  <div>
+                    <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Asistente (sandbox)</h1>
+                    <p style={{ margin: '5px 0 0', color: 'var(--text-3)', fontSize: 13 }}>Entorno de prueba aislado — no afecta datos reales.</p>
+                  </div>
+                </div>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-sm)', padding: 40, textAlign: 'center', maxWidth: 480 }}>
+                  <div style={{ fontSize: 36, marginBottom: 16 }}>🧪</div>
+                  <h2 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Sin datos de prueba</h2>
+                  <p style={{ fontSize: 13.5, color: 'var(--text-3)', margin: '0 0 24px', lineHeight: 1.6 }}>
+                    Carga el equipo de ejemplo para que el asistente tenga trabajadores y turnos sobre los que operar.
+                  </p>
+                  <button onClick={seedSandbox} style={{
+                    padding: '10px 22px', borderRadius: 9, border: 'none', background: '#4664c9', color: 'white',
+                    fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <Icon name="magic" size={16} stroke={1.9} /> Cargar equipo de ejemplo
+                  </button>
+                  <p style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 16 }}>
+                    12 trabajadores · 4 turnos · semana en blanco lista para optimizar
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 32px 0', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>
+                    🧪 Sandbox · {saWorkers.length} trabajadores cargados
+                  </span>
+                  <button onClick={() => { setSaWorkers([]); setSaSchedules({}); }} style={{
+                    padding: '4px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)',
+                    fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12, color: 'var(--text-2)', cursor: 'pointer',
+                  }}>Limpiar sandbox</button>
+                </div>
+                <AsistenteView
+                  workers={saDisplayWorkers}
+                  selectedWeek={saWeek}
+                  onApplySchedule={handleSaApply}
+                  dark={dark}
+                  goTab={setTab}
+                  solverConfig={solverConfig}
+                />
+              </div>
+            )
+          )}
 
           {/* ── Admin views (full existing suite) ── */}
           {effectiveRole === 'admin' && tab === 'turnos' && (
