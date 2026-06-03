@@ -35,16 +35,7 @@ export function planById(id: string): PlatformPlan {
 }
 
 // ─── Organizations ─────────────────────────────────────────────────────────
-export const PLATFORM_ORGS: PlatformOrg[] = [
-  { id: 'o1', name: 'Estación Norte S.A.', type: 'Estación de servicio', plan: 'pro', status: 'active', users: 38, sucursales: 3, mrr: 79, usagePct: 63, owner: 'Marina López', since: '2024-03', country: 'AR' },
-  { id: 'o2', name: 'Shell Ruta 9', type: 'Estación de servicio', plan: 'enterprise', status: 'active', users: 142, sucursales: 11, mrr: 540, usagePct: 71, owner: 'Ricardo Paz', since: '2023-09', country: 'AR' },
-  { id: 'o3', name: 'Café del Puerto', type: 'Gastronomía', plan: 'starter', status: 'trial', users: 9, sucursales: 1, mrr: 0, usagePct: 41, owner: 'Lucía Fernández', since: '2025-05', country: 'UY' },
-  { id: 'o4', name: 'Clínica San Lucas', type: 'Salud', plan: 'pro', status: 'active', users: 54, sucursales: 2, mrr: 79, usagePct: 88, owner: 'Dr. Tomás Real', since: '2024-01', country: 'CL' },
-  { id: 'o5', name: 'Supermercados Vega', type: 'Retail', plan: 'enterprise', status: 'active', users: 210, sucursales: 18, mrr: 720, usagePct: 66, owner: 'Vanesa Gómez', since: '2023-04', country: 'AR' },
-  { id: 'o6', name: 'Logística Andes', type: 'Logística', plan: 'pro', status: 'suspended', users: 31, sucursales: 4, mrr: 0, usagePct: 12, owner: 'Hernán Díaz', since: '2024-07', country: 'PE' },
-  { id: 'o7', name: 'Hotel Mirador', type: 'Hotelería', plan: 'starter', status: 'active', users: 12, sucursales: 1, mrr: 29, usagePct: 55, owner: 'Paula Ortiz', since: '2025-01', country: 'AR' },
-  { id: 'o8', name: 'Farmacias Lux', type: 'Salud', plan: 'pro', status: 'trial', users: 22, sucursales: 3, mrr: 0, usagePct: 34, owner: 'Sergio Bravo', since: '2025-05', country: 'AR' },
-];
+export const PLATFORM_ORGS: PlatformOrg[] = [];
 
 export const ORG_STATUS: Record<string, { label: string; kind: string }> = {
   active:    { label: 'Activa',      kind: 'ok' },
@@ -53,18 +44,7 @@ export const ORG_STATUS: Record<string, { label: string; kind: string }> = {
 };
 
 // ─── Platform users ────────────────────────────────────────────────────────
-export const PLATFORM_USERS: PlatformUser[] = [
-  { id: 'u1', name: 'Marina López', email: 'marina@estacionnorte.com', org: 'Estación Norte S.A.', role: 'admin', status: 'active', last: 'hace 4 min', twofa: true },
-  { id: 'u2', name: 'Carlos Núñez', email: 'carlos@estacionnorte.com', org: 'Estación Norte S.A.', role: 'supervisor', status: 'active', last: 'hace 1 h', twofa: false },
-  { id: 'u3', name: 'Sofía Ibarra', email: 'sofia@estacionnorte.com', org: 'Estación Norte S.A.', role: 'empleado', status: 'active', last: 'ayer', twofa: false },
-  { id: 'u4', name: 'Ricardo Paz', email: 'rpaz@shellruta9.com', org: 'Shell Ruta 9', role: 'admin', status: 'active', last: 'hace 20 min', twofa: true },
-  { id: 'u5', name: 'Vanesa Gómez', email: 'vgomez@svega.com', org: 'Supermercados Vega', role: 'admin', status: 'active', last: 'hace 2 h', twofa: true },
-  { id: 'u6', name: 'Dr. Tomás Real', email: 'treal@sanlucas.cl', org: 'Clínica San Lucas', role: 'admin', status: 'active', last: 'hace 5 h', twofa: true },
-  { id: 'u7', name: 'Lucía Fernández', email: 'lucia@cafedelpuerto.uy', org: 'Café del Puerto', role: 'admin', status: 'invited', last: '—', twofa: false },
-  { id: 'u8', name: 'Hernán Díaz', email: 'hdiaz@logandes.pe', org: 'Logística Andes', role: 'admin', status: 'suspended', last: 'hace 12 días', twofa: false },
-  { id: 'u9', name: 'Ana Belmonte', email: 'ana@soporte.turnos.app', org: 'Turnos (interno)', role: 'super', status: 'active', last: 'ahora', twofa: true },
-  { id: 'u10', name: 'Diego Ferreyra', email: 'diego@estacionnorte.com', org: 'Estación Norte S.A.', role: 'empleado', status: 'active', last: 'hace 3 h', twofa: false },
-];
+export const PLATFORM_USERS: PlatformUser[] = [];
 
 export const USER_STATUS: Record<string, { label: string; kind: string }> = {
   active:    { label: 'Activo',     kind: 'ok' },
@@ -133,25 +113,16 @@ export const REQ_STATUS: Record<string, { label: string; kind: string }> = {
 };
 
 // ─── Audit log ─────────────────────────────────────────────────────────────
-export const AUDIT_EVENTS: AuditEvent[] = [
-  { id: 'a1', time: '10:42', date: 'Hoy',  user: 'Ana Belmonte',   role: 'super',      action: 'Suspendió la organización',       target: 'Logística Andes',    kind: 'bad' },
-  { id: 'a2', time: '10:31', date: 'Hoy',  user: 'Marina López',   role: 'admin',      action: 'Aprobó solicitud de vacaciones',   target: 'Gabriel Ortiz',      kind: 'ok' },
-  { id: 'a3', time: '09:58', date: 'Hoy',  user: 'Ricardo Paz',    role: 'admin',      action: 'Cambió de plan Pro → Enterprise',  target: 'Shell Ruta 9',       kind: 'info' },
-  { id: 'a4', time: '09:12', date: 'Hoy',  user: 'Sofía Ibarra',   role: 'empleado',   action: 'Solicitó intercambio de turno',    target: 'Mié · Mañana',       kind: 'neutral' },
-  { id: 'a5', time: '18:20', date: 'Ayer', user: 'Ana Belmonte',   role: 'super',      action: 'Creó plantilla de franja',         target: 'Turno Partido',      kind: 'info' },
-  { id: 'a6', time: '17:03', date: 'Ayer', user: 'Vanesa Gómez',   role: 'admin',      action: 'Invitó a 4 miembros',              target: 'Supermercados Vega', kind: 'neutral' },
-  { id: 'a7', time: '16:44', date: 'Ayer', user: 'Carlos Núñez',   role: 'supervisor', action: 'Editó el cuadro de turnos',        target: 'Semana 22',          kind: 'neutral' },
-  { id: 'a8', time: '11:10', date: 'Ayer', user: 'Hernán Díaz',    role: 'admin',      action: 'Intento de acceso bloqueado',      target: 'IP 190.2.x.x',       kind: 'bad' },
-];
+export const AUDIT_EVENTS: AuditEvent[] = [];
 
 // ─── System services & tickets ─────────────────────────────────────────────
 export const PLATFORM_SERVICES: PlatformService[] = [
-  { id: 'api',  name: 'API principal',         status: 'ok',       uptime: '99.98%' },
-  { id: 'web',  name: 'Aplicación web',         status: 'ok',       uptime: '99.99%' },
-  { id: 'auth', name: 'Autenticación / SSO',    status: 'ok',       uptime: '100%' },
-  { id: 'jobs', name: 'Asistente de turnos',    status: 'degraded', uptime: '99.4%' },
-  { id: 'mail', name: 'Notificaciones email',   status: 'ok',       uptime: '99.95%' },
-  { id: 'db',   name: 'Base de datos',          status: 'ok',       uptime: '99.99%' },
+  { id: 'api',  name: 'API principal',        status: 'ok', uptime: '—' },
+  { id: 'web',  name: 'Aplicación web',        status: 'ok', uptime: '—' },
+  { id: 'auth', name: 'Autenticación / SSO',   status: 'ok', uptime: '—' },
+  { id: 'jobs', name: 'Asistente de turnos',   status: 'ok', uptime: '—' },
+  { id: 'mail', name: 'Notificaciones email',  status: 'ok', uptime: '—' },
+  { id: 'db',   name: 'Base de datos',         status: 'ok', uptime: '—' },
 ];
 
 export const SERVICE_STATUS: Record<string, { label: string; kind: string }> = {
@@ -160,18 +131,10 @@ export const SERVICE_STATUS: Record<string, { label: string; kind: string }> = {
   down:     { label: 'Caído',     kind: 'bad' },
 };
 
-export const SUPPORT_TICKETS: SupportTicket[] = [
-  { id: 'T-1042', org: 'Clínica San Lucas',    subject: 'El asistente no respeta días libres',     priority: 'alta',  status: 'abierto',    age: '2 h' },
-  { id: 'T-1039', org: 'Supermercados Vega',   subject: 'Solicitan factura del mes anterior',       priority: 'media', status: 'abierto',    age: '5 h' },
-  { id: 'T-1035', org: 'Hotel Mirador',        subject: '¿Cómo cambio el plan a Pro?',             priority: 'baja',  status: 'respondido', age: '1 día' },
-  { id: 'T-1028', org: 'Estación Norte S.A.',  subject: 'Error al exportar estadísticas',           priority: 'media', status: 'abierto',    age: '1 día' },
-];
+export const SUPPORT_TICKETS: SupportTicket[] = [];
 
 export const PRIORITY_KIND: Record<string, string> = { alta: 'bad', media: 'warn', baja: 'neutral' };
 
-// ─── Metrics series ────────────────────────────────────────────────────────
-export const MRR_SERIES = [980, 1020, 1100, 1180, 1240, 1320, 1410, 1480, 1560, 1640, 1710, 1817];
-export const USAGE_SERIES = [42, 48, 51, 49, 58, 63, 61, 68, 72, 70, 78, 84];
 
 // ─── Team mock (for supervisor/admin views) ────────────────────────────────
 export interface TeamMember {

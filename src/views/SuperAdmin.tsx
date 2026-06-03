@@ -3,7 +3,7 @@ import { Icon } from '../components/Icon';
 import { hueColors, kindColors, initials, avatarBg } from '../data';
 import {
   PLATFORM_ORGS, PLATFORM_PLANS, PLATFORM_USERS, AUDIT_EVENTS, PLATFORM_SERVICES,
-  SUPPORT_TICKETS, MRR_SERIES, USAGE_SERIES, ORG_STATUS, USER_STATUS, SERVICE_STATUS,
+  SUPPORT_TICKETS, ORG_STATUS, USER_STATUS, SERVICE_STATUS,
   PRIORITY_KIND, CAPABILITIES, PERMISSIONS, PLATFORM_ROLES, planById,
 } from '../data/platform';
 
@@ -35,18 +35,6 @@ function Avatar({ name, size = 32, dark, hue }: { name: string; size?: number; d
   );
 }
 
-function Spark({ data, dark, hue = 250, height = 44 }: { data: number[]; dark: boolean; hue?: number; height?: number }) {
-  const w = 220, h = height, max = Math.max(...data), min = Math.min(...data), span = max - min || 1;
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * w, h - ((v - min) / span) * (h - 6) - 3]);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-  const co = hueColors(hue, dark);
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height, display: 'block' }}>
-      <path d={`${line} L ${w} ${h} L 0 ${h} Z`} fill={co.bg} stroke="none" />
-      <path d={line} fill="none" stroke={co.dot} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 function Bar({ pct, hue = 250, kind, dark, h = 8 }: { pct: number; hue?: number; kind?: string; dark: boolean; h?: number }) {
   const co = kind ? kindColors(kind, dark) : hueColors(hue, dark);
@@ -160,10 +148,7 @@ export function SAResumen({ dark, toast }: { dark: boolean; toast: (msg: string,
   const suspended = orgs.filter((o) => o.status === 'suspended').length;
   const mrr = orgs.reduce((s, o) => s + o.mrr, 0);
   const totalUsers = orgs.reduce((s, o) => s + o.users, 0);
-  const lastMrr = MRR_SERIES[MRR_SERIES.length - 1];
-  const prevMrr = MRR_SERIES[MRR_SERIES.length - 2];
-  const mrrGrow = Math.round(((lastMrr - prevMrr) / prevMrr) * 100);
-  void toast; void mrr;
+  void toast;
 
   return (
     <div className="view-pad">
@@ -173,73 +158,62 @@ export function SAResumen({ dark, toast }: { dark: boolean; toast: (msg: string,
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 14 }}>
         <Kpi label="Organizaciones" value={orgs.length} icon="building" dark={dark} hue={250} sub={`${active} activas · ${trial} en prueba · ${suspended} suspendidas`} />
-        <Kpi label="MRR" value={`$${lastMrr.toLocaleString()}`} icon="dollar" dark={dark} kind="ok" sub={`+${mrrGrow}% vs. mes anterior`} />
+        <Kpi label="MRR" value={`$${mrr.toLocaleString()}`} icon="dollar" dark={dark} kind="ok" sub="ingresos recurrentes mensuales" />
         <Kpi label="Usuarios" value={totalUsers} icon="users" dark={dark} hue={180} sub={`${PLATFORM_USERS.length} con acceso a backoffice`} />
-        <Kpi label="Uso medio" value="78" unit="%" icon="trend" dark={dark} hue={70} sub="de los límites de plan consumidos" />
+        <Kpi label="Uso medio" value={orgs.length ? Math.round(orgs.reduce((s, o) => s + o.usagePct, 0) / orgs.length) : 0} unit="%" icon="trend" dark={dark} hue={70} sub="de los límites de plan consumidos" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Card>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Ingresos recurrentes (MRR)</h3>
-            <span style={{ fontSize: 11.5, color: 'var(--text-3)', fontFamily: '"IBM Plex Mono", monospace' }}>${MRR_SERIES[0].toLocaleString()} → ${lastMrr.toLocaleString()}</span>
-          </div>
-          <Spark data={MRR_SERIES} dark={dark} hue={155} height={64} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 10.5, color: 'var(--text-3)', fontFamily: '"IBM Plex Mono", monospace' }}>
-            {['Jul', 'Oct', 'Ene', 'Abr', 'Hoy'].map((l) => <span key={l}>{l}</span>)}
-          </div>
+      {orgs.length === 0 ? (
+        <Card style={{ padding: 40, textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>🏢</div>
+          <h2 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 8px' }}>Sin organizaciones todavía</h2>
+          <p style={{ fontSize: 13.5, color: 'var(--text-3)', margin: 0, lineHeight: 1.6 }}>
+            Las métricas, el MRR y la actividad aparecerán aquí cuando haya organizaciones registradas en la plataforma.
+          </p>
         </Card>
-        <Card>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Adopción / uso</h3>
-            <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>% límites consumidos</span>
-          </div>
-          <Spark data={USAGE_SERIES} dark={dark} hue={250} height={64} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 10.5, color: 'var(--text-3)', fontFamily: '"IBM Plex Mono", monospace' }}>
-            {['Jul', 'Oct', 'Ene', 'Abr', 'Hoy'].map((l) => <span key={l}>{l}</span>)}
-          </div>
-        </Card>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
-        <Card>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Planes</h3>
-            <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{orgs.length} organizaciones</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {PLATFORM_PLANS.map((p) => {
-              const n = orgs.filter((o) => o.plan === p.id).length;
-              const hue = p.id === 'enterprise' ? 300 : p.id === 'pro' ? 250 : 180;
-              return (
-                <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 44px', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{p.name}</span>
-                  <Bar pct={(n / orgs.length) * 100} hue={hue} dark={dark} h={9} />
-                  <span style={{ fontSize: 12, textAlign: 'right', color: 'var(--text-1)', fontWeight: 600 }}>{n}</span>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-        <Card>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Actividad reciente</h3>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {AUDIT_EVENTS.slice(0, 5).map((a) => (
-              <div key={a.id} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
-                <span style={{ width: 8, height: 8, borderRadius: 99, background: kindColors(a.kind, dark).dot, marginTop: 5, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.4 }}>
-                    <b style={{ color: 'var(--text-1)', fontWeight: 600 }}>{a.user}</b> {a.action.toLowerCase()} <b style={{ color: 'var(--text-1)', fontWeight: 600 }}>{a.target}</b>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Distribución por plan</h3>
+              <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{orgs.length} organizaciones</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {PLATFORM_PLANS.map((p) => {
+                const n = orgs.filter((o) => o.plan === p.id).length;
+                const hue = p.id === 'enterprise' ? 300 : p.id === 'pro' ? 250 : 180;
+                return (
+                  <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 44px', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-2)' }}>{p.name}</span>
+                    <Bar pct={orgs.length ? (n / orgs.length) * 100 : 0} hue={hue} dark={dark} h={9} />
+                    <span style={{ fontSize: 12, textAlign: 'right', color: 'var(--text-1)', fontWeight: 600 }}>{n}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: '"IBM Plex Mono", monospace' }}>{a.date} · {a.time}</div>
-                </div>
+                );
+              })}
+            </div>
+          </Card>
+          <Card>
+            <div style={{ marginBottom: 16 }}><h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Actividad reciente</h3></div>
+            {AUDIT_EVENTS.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--text-3)', margin: 0 }}>Sin eventos registrados.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+                {AUDIT_EVENTS.slice(0, 5).map((a) => (
+                  <div key={a.id} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 99, background: kindColors(a.kind, dark).dot, marginTop: 5, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.4 }}>
+                        <b style={{ color: 'var(--text-1)', fontWeight: 600 }}>{a.user}</b> {a.action.toLowerCase()} <b style={{ color: 'var(--text-1)', fontWeight: 600 }}>{a.target}</b>
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: '"IBM Plex Mono", monospace' }}>{a.date} · {a.time}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+            )}
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
