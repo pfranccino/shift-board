@@ -3,11 +3,13 @@ import {
   DAYS, ROLES, getCatIds, getCat, getShiftIds, getShift, getCoverage,
   shiftColors, statusColors, coverageSummary, weeklyHours,
   initials, avatarBg, formatWeekRange, formatMonthYear, weekKeyToMonthYear,
-  getWeeksOfMonth,
+  getWeeksOfMonth, DEFAULT_SOLVER_CONFIG,
 } from '../data';
 import { Icon } from '../components/Icon';
 import { isFirebaseConfigured, fbAuth } from '../lib/firebase';
 import { useJobStatus, useMultipleJobStatus } from '../lib/useFirestore';
+import { buildRecommendations, reachableTarget, shiftDurations, weeklyCap } from '../lib/recommend';
+import type { Recommendation } from '../lib/recommend';
 import type { Worker, SolverConfig } from '../types';
 
 interface Props {
@@ -42,6 +44,7 @@ interface ProposalItem {
   workDays: number;
   hours: number;
   target: number;
+  reach: number; // max hours reachable ≤ target given shift blocks + caps
   diff: number;
   status: 'exact' | 'over' | 'under';
   warning: string | null;
@@ -51,12 +54,44 @@ interface ProposalItem {
 type SolverPhase =
   | { kind: 'idle' }
   | { kind: 'submitting' }
-  | { kind: 'polling'; jobId: string }
+  | { kind: 'polling'; jobId: string; weekKey: string }
   | { kind: 'polling_month'; weekJobs: Record<string, string> } // weekKey → jobId
-  | { kind: 'ready'; items: ProposalItem[] }
+  | { kind: 'ready'; items: ProposalItem[]; weekKey: string }
   | { kind: 'ready_month'; weekResults: { weekKey: string; items: ProposalItem[] }[] }
   | { kind: 'infeasible'; reasons: InfeasibilityReason[] }
   | { kind: 'error'; message: string };
+
+// ── Active-job persistence (survives leaving/returning to the Asistente tab) ──
+const JOB_LS_KEY = 'sb_asist_active_job';
+const JOB_TTL_MS = 6 * 60 * 60 * 1000; // 6h — don't resurrect ancient jobs
+
+type SavedJobBase =
+  | { kind: 'polling'; orgId: string; jobId: string; weekKey: string }
+  | { kind: 'polling_month'; orgId: string; weekJobs: Record<string, string> };
+type SavedJob = SavedJobBase & { ts: number };
+
+function saveActiveJob(data: SavedJobBase) {
+  try { localStorage.setItem(JOB_LS_KEY, JSON.stringify({ ...data, ts: Date.now() })); } catch { /* ignore */ }
+}
+function clearActiveJob() {
+  try { localStorage.removeItem(JOB_LS_KEY); } catch { /* ignore */ }
+}
+function loadActiveJob(orgId: string): SavedJob | null {
+  try {
+    const s = localStorage.getItem(JOB_LS_KEY);
+    if (!s) return null;
+    const d = JSON.parse(s) as SavedJob;
+    if (d.orgId !== orgId || Date.now() - d.ts > JOB_TTL_MS) return null;
+    return d;
+  } catch { return null; }
+}
+
+/** Status from shift blocks: exact (= target), at the reachable max, or under. */
+function hoursStatus(hours: number, target: number, reach: number): ProposalItem['status'] {
+  if (hours > target) return 'over';
+  if (hours === target || hours >= reach) return 'exact';
+  return 'under';
+}
 
 function preferredShift(worker: Worker, base: string): string {
   if (base && base !== 'auto') return base;
@@ -134,16 +169,19 @@ function detectInfeasibility(proposal: ProposalItem[], allWorkers: Worker[]): In
   return reasons;
 }
 
-function buildProposal(workers: Worker[], rules: Rules): ProposalItem[] {
+function buildProposal(workers: Worker[], rules: Rules, solverConfig?: SolverConfig): ProposalItem[] {
   const weekdays = DAYS.filter((d) => !d.weekend).map((d) => d.key);
   const allDays = DAYS.map((d) => d.key);
   const eligible = rules.incluirFinde ? allDays : weekdays;
+  const durations = shiftDurations();
+  const cap = weeklyCap(solverConfig, durations);
 
   return workers.map((w) => {
     const pref = preferredShift(w, rules.turnoBase);
     const sh = getShift(pref).hours;
     const target = w.contracted_hours;
-    const idealDays = sh > 0 ? Math.round(target / sh) : 0;
+    // floor → never schedule past the target
+    const idealDays = sh > 0 ? Math.floor(target / sh) : 0;
     const capByRest = 7 - rules.minLibres;
     const workDays = Math.max(0, Math.min(idealDays, capByRest, eligible.length));
     const dayKeys = pickDays(eligible, workDays, rules.distribucion);
@@ -153,22 +191,25 @@ function buildProposal(workers: Worker[], rules: Rules): ProposalItem[] {
     dayKeys.forEach((k) => { newShifts[k] = pref; });
 
     const hours = workDays * sh;
+    const reach = reachableTarget(target, durations, cap);
     const diff = hours - target;
-    const status: ProposalItem['status'] = diff === 0 ? 'exact' : diff > 0 ? 'over' : 'under';
+    const status = hoursStatus(hours, target, reach);
     let warning: string | null = null;
-    if (rules.respetarMeta && diff !== 0) {
-      warning = diff < 0
-        ? `No llega a la meta (faltan ${-diff}h).`
-        : `Supera la meta (+${diff}h).`;
+    if (rules.respetarMeta && status === 'under') {
+      warning = `No llega al máximo posible (faltan ${reach - hours}h de ${reach}h alcanzables).`;
     }
-    return { worker: w, pref, workDays, hours, target, diff, status, warning, newShifts };
+    return { worker: w, pref, workDays, hours, target, reach, diff, status, warning, newShifts };
   });
 }
 
 function buildProposalFromAssignments(
   assignments: Record<string, Record<string, string>>,
-  allWorkers: Worker[]
+  allWorkers: Worker[],
+  solverConfig?: SolverConfig
 ): ProposalItem[] {
+  const durations = shiftDurations();
+  const cap = weeklyCap(solverConfig, durations);
+
   return allWorkers
     .filter((w) => w.id in assignments)
     .map((w) => {
@@ -178,13 +219,14 @@ function buildProposalFromAssignments(
 
       const nonLibre = Object.values(newShifts).filter((s) => s && s !== 'libre');
       const pref = nonLibre[0] ?? 'libre';
-      const sh = pref !== 'libre' ? (getShift(pref)?.hours ?? 0) : 0;
       const workDays = nonLibre.length;
-      const hours = workDays * sh;
+      // Sum the real duration of each assigned shift (handles mixed shifts).
+      const hours = nonLibre.reduce((sum, s) => sum + (getShift(s)?.hours ?? 0), 0);
       const target = w.contracted_hours;
+      const reach = reachableTarget(target, durations, cap);
       const diff = hours - target;
-      const status: ProposalItem['status'] = diff === 0 ? 'exact' : diff > 0 ? 'over' : 'under';
-      return { worker: w, pref, workDays, hours, target, diff, status, warning: null, newShifts };
+      const status = hoursStatus(hours, target, reach);
+      return { worker: w, pref, workDays, hours, target, reach, diff, status, warning: null, newShifts };
     });
 }
 
@@ -277,6 +319,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
   const [solverPhase, setSolverPhase] = useState<SolverPhase>({ kind: 'idle' });
   const [solverMode, setSolverMode] = useState<'week' | 'month'>('week');
   const [selectedMonthYear, setSelectedMonthYear] = useState(() => weekKeyToMonthYear(selectedWeek));
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const set = <K extends keyof Rules>(k: K, v: Rules[K]) => setRules((r) => ({ ...r, [k]: v }));
 
   const scoped = rules.scope === 'Todas' ? workers : workers.filter((w) => w.cat === rules.scope);
@@ -293,11 +336,29 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     : [];
   const monthJobStatuses = useMultipleJobStatus(orgId ?? '', monthJobIds);
 
+  // Restore an in-flight (or just-finished) job when returning to this tab.
+  // The component unmounts on tab change and loses its state, but the job keeps
+  // running on the backend — re-subscribe via the persisted job id(s).
+  useEffect(() => {
+    if (!orgId || solverPhase.kind !== 'idle') return;
+    const saved = loadActiveJob(orgId);
+    if (!saved) return;
+    if (saved.kind === 'polling') {
+      setSolverPhase({ kind: 'polling', jobId: saved.jobId, weekKey: saved.weekKey });
+    } else if (saved.kind === 'polling_month') {
+      setSolverPhase({ kind: 'polling_month', weekJobs: saved.weekJobs });
+    }
+  }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!jobStatus) return;
     if (jobStatus.status === 'done' && jobStatus.result) {
-      const items = buildProposalFromAssignments(jobStatus.result.assignments, workers);
-      setSolverPhase({ kind: 'ready', items });
+      const assignments = jobStatus.result.assignments;
+      setSolverPhase((prev) => ({
+        kind: 'ready',
+        items: buildProposalFromAssignments(assignments, workers, solverConfig),
+        weekKey: prev.kind === 'polling' ? prev.weekKey : selectedWeek,
+      }));
     } else if (jobStatus.status === 'infeasible') {
       setSolverPhase({ kind: 'infeasible', reasons: jobStatus.infeasibility_reasons ?? [] });
     } else if (jobStatus.status === 'error') {
@@ -326,7 +387,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     const weekResults = weeks.map((wk) => {
       const js = monthJobStatuses[weekJobs[wk]];
       const items = js?.status === 'done' && js.result
-        ? buildProposalFromAssignments(js.result.assignments, workers)
+        ? buildProposalFromAssignments(js.result.assignments, workers, solverConfig)
         : [];
       return { weekKey: wk, items };
     });
@@ -334,9 +395,13 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
   }, [monthJobStatuses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generate = async () => {
+    // Recommendations are pure arithmetic — compute on every generate, both modes.
+    setRecommendations(buildRecommendations(scoped, solverConfig ?? DEFAULT_SOLVER_CONFIG));
+    clearActiveJob();
+
     if (!isFirebaseConfigured || !fbAuth?.currentUser || !orgId) {
       // Local fallback
-      const p = buildProposal(scoped, rules);
+      const p = buildProposal(scoped, rules, solverConfig);
       const reasons = detectInfeasibility(p, workers);
       if (solverMode === 'month') {
         const weeks = getWeeksOfMonth(selectedMonthYear.year, selectedMonthYear.month);
@@ -345,7 +410,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
           : weeks.map((weekKey) => ({ weekKey, items: p }));
         setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready_month', weekResults });
       } else {
-        setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready', items: p });
+        setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready', items: p, weekKey: selectedWeek });
       }
       return;
     }
@@ -373,7 +438,8 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
         });
         if (!res.ok) throw new Error(`Error del servidor: ${res.status}`);
         const { job_id } = await res.json();
-        setSolverPhase({ kind: 'polling', jobId: job_id });
+        saveActiveJob({ kind: 'polling', orgId, jobId: job_id, weekKey: selectedWeek });
+        setSolverPhase({ kind: 'polling', jobId: job_id, weekKey: selectedWeek });
       } else {
         const weeks = getWeeksOfMonth(selectedMonthYear.year, selectedMonthYear.month);
         const results = await Promise.all(weeks.map((weekKey) =>
@@ -389,6 +455,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
         ));
         const weekJobs: Record<string, string> = {};
         weeks.forEach((wk, i) => { weekJobs[wk] = results[i].job_id; });
+        saveActiveJob({ kind: 'polling_month', orgId, weekJobs });
         setSolverPhase({ kind: 'polling_month', weekJobs });
       }
     } catch (e: any) {
@@ -396,13 +463,13 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     }
   };
 
-  const discard = () => setSolverPhase({ kind: 'idle' });
+  const discard = () => { clearActiveJob(); setSolverPhase({ kind: 'idle' }); };
 
   const apply = () => {
     if (solverPhase.kind === 'ready') {
       const assignments: Record<string, Record<string, string>> = {};
       solverPhase.items.forEach((p) => { assignments[p.worker.id] = p.newShifts; });
-      onApplySchedule(assignments);
+      onApplySchedule(assignments, solverPhase.weekKey);
     } else if (solverPhase.kind === 'ready_month') {
       solverPhase.weekResults.forEach(({ weekKey, items }) => {
         const assignments: Record<string, Record<string, string>> = {};
@@ -410,6 +477,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
         if (Object.keys(assignments).length > 0) onApplySchedule(assignments, weekKey);
       });
     } else return;
+    clearActiveJob();
     setSolverPhase({ kind: 'idle' });
     goTab('turnos');
   };
@@ -423,7 +491,8 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     return {
       n: proposal.length,
       exact: proposal.filter((p) => p.status === 'exact').length,
-      warn: proposal.filter((p) => p.warning).length,
+      under: proposal.filter((p) => p.status === 'under').length,
+      warn: proposal.filter((p) => p.warning || p.status === 'under').length,
       cov: coverageSummary(merged),
     };
   }, [solverPhase, workers]);
@@ -453,6 +522,30 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
   const nextMonth = () => setSelectedMonthYear(({ year: y, month: m }) =>
     m === 11 ? { year: y + 1, month: 0 } : { year: y, month: m + 1 }
   );
+
+  const recosBlock = recommendations.length > 0 ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon name="bolt" size={14} style={{ color: accent }} /> Recomendaciones para mejorar el cuadro
+      </div>
+      {recommendations.map((r) => {
+        const dot = r.severity === 'warn' ? statusColors('under', dark).fg : accent;
+        return (
+          <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', background: 'var(--surface-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: dot, flexShrink: 0 }} />
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)' }}>{r.title}</span>
+            </div>
+            <p style={{ margin: '0 0 6px', fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45 }}>{r.detail}</p>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45 }}>
+              <Icon name="arrow" size={12} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+              <span>{r.suggestion}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
 
   return (
     <div className="view-pad">
@@ -676,10 +769,10 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11, fontSize: 13, color: 'var(--text-2)', flexWrap: 'wrap' }}>
                   <span><b style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--text-1)' }}>{summary!.n}</b> trabajadores</span>
                   <span style={{ width: 3, height: 3, borderRadius: 99, background: text3, opacity: 0.5 }} />
-                  <span style={{ color: statusColors('exact', dark).fg }}><b style={{ fontFamily: '"IBM Plex Mono", monospace' }}>{summary!.exact}</b> con meta exacta</span>
-                  {summary!.warn > 0 && (
+                  <span style={{ color: statusColors('exact', dark).fg }}><b style={{ fontFamily: '"IBM Plex Mono", monospace' }}>{summary!.exact}</b> en su máximo posible</span>
+                  {summary!.under > 0 && (
                     <><span style={{ width: 3, height: 3, borderRadius: 99, background: text3, opacity: 0.5 }} />
-                    <span style={{ color: statusColors('under', dark).fg }}><Icon name="warn" size={13} style={{ verticalAlign: '-2px' }} /> <b style={{ fontFamily: '"IBM Plex Mono", monospace' }}>{summary!.warn}</b> con aviso</span></>
+                    <span style={{ color: statusColors('under', dark).fg }}><Icon name="warn" size={13} style={{ verticalAlign: '-2px' }} /> <b style={{ fontFamily: '"IBM Plex Mono", monospace' }}>{summary!.under}</b> por debajo</span></>
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: 9 }}>
@@ -688,20 +781,26 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                 </div>
               </div>
 
+              {recosBlock}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {solverPhase.items.map((p) => {
                   const sc = statusColors(p.status, dark);
                   const sc2 = shiftColors(p.pref, dark);
+                  const isUnder = p.status === 'under';
                   const warnBg = `color-mix(in oklch, oklch(0.6 0.12 28) 6%, transparent)`;
+                  const rowTip = isUnder
+                    ? (p.warning ?? `Quedan ${p.reach - p.hours}h por asignar para llegar a su máximo posible (${p.reach}h).`)
+                    : (p.hours < p.target ? `Máximo posible con las franjas actuales: ${p.hours}h de ${p.target}h.` : 'Cumple su meta exacta.');
                   return (
-                    <div key={p.worker.id} style={{
+                    <div key={p.worker.id} title={rowTip} style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '10px', borderRadius: 10,
                       transition: 'background .1s',
-                      background: p.warning ? warnBg : 'transparent',
+                      background: isUnder ? warnBg : 'transparent',
                     }}
-                      onMouseEnter={(e) => { if (!p.warning) (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
-                      onMouseLeave={(e) => { if (!p.warning) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                      onMouseEnter={(e) => { if (!isUnder) (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
+                      onMouseLeave={(e) => { if (!isUnder) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                         <span style={{
@@ -730,19 +829,19 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                         <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 13.5, fontWeight: 600, color: sc.fg }}>{p.hours}h</span>
                         <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11, color: text3 }}>/ {p.target}h</span>
                       </div>
-                      {p.warning
-                        ? <span title={p.warning} style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: 7, background: statusColors('under', dark).bg, color: statusColors('under', dark).fg }}><Icon name="warn" size={13} /></span>
+                      {isUnder
+                        ? <span style={{ flexShrink: 0, display: 'grid', placeItems: 'center', width: 24, height: 24, borderRadius: 7, background: statusColors('under', dark).bg, color: statusColors('under', dark).fg }}><Icon name="warn" size={13} /></span>
                         : <span style={{ flexShrink: 0, display: 'grid', placeItems: 'center', color: sc.fg, width: 24 }}><Icon name="check" size={15} stroke={2.4} /></span>}
                     </div>
                   );
                 })}
               </div>
 
-              {(summary!.warn > 0 || summary!.cov.gaps.length > 0) && (
+              {(summary!.under > 0 || summary!.cov.gaps.length > 0) && (
                 <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 18, padding: '12px 14px', borderRadius: 10, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
                   <Icon name="warn" size={14} style={{ flexShrink: 0, marginTop: 1, color: statusColors('under', dark).fg }} />
                   <span>
-                    {summary!.warn > 0 && 'Algunos trabajadores no alcanzan su meta: reduce los días libres mínimos, cambia el turno base o habilita los fines de semana. '}
+                    {summary!.under > 0 && `${summary!.under} trabajador(es) quedaron por debajo de su máximo posible (la cobertura o el descanso no permiten asignarles más horas). Revisá las recomendaciones de arriba. `}
                     {summary!.cov.gaps.length > 0 && `Quedan ${summary!.cov.gaps.length} franja(s)-día por debajo del mínimo de cobertura.`}
                   </span>
                 </div>
@@ -762,6 +861,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                   <button style={btnPrimary} onClick={apply}><Icon name="check" size={15} stroke={2.2} /> Aplicar mes al cuadro</button>
                 </div>
               </div>
+              {recosBlock}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                 {solverPhase.weekResults.map(({ weekKey, items }) => (
                   <div key={weekKey}>

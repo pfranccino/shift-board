@@ -4,3 +4,5 @@ dist
 *.local
 .claude
 *.tsbuildinfo
+__pycache__/
+*.pyc

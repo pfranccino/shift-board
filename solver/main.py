@@ -93,20 +93,22 @@ def _build_infeasibility_reasons(payload: dict) -> list[dict]:
         for t in range(7 - max_consec):
             prob += lpSum(lpSum(x[(w, d, s)] for s in SIDs) for d in range(t, t + max_consec + 1)) <= max_consec
 
-    over = LpVariable.dicts('over', WIDs, lowBound=0)
+    # Mirror the real model: hours are capped at the target (never exceeded), so
+    # a coverage demand that can't be met within everyone's contracted hours shows
+    # up as coverage slack here — pointing at the true, actionable cause.
     under = LpVariable.dicts('under', WIDs, lowBound=0)
     for w_data in workers:
         w = w_data['id']
         actual = lpSum(sm[s]['hours'] * x[(w, d, s)] for d in D for s in SIDs)
         target = w_data.get('contracted_hours', 40)
-        prob += over[w] >= actual - target
+        prob += actual <= target
         prob += under[w] >= target - actual
 
     wm = {w['id']: w for w in workers}
     prob += 1000 * lpSum(slack[(s, d)] for s in SIDs for d in D) + \
-           lpSum(100 * (over[w] + under[w]) for w in WIDs)
+           lpSum(100 * under[w] for w in WIDs)
 
-    prob.solve(PULP_CBC_CMD(msg=0))
+    prob.solve(PULP_CBC_CMD(msg=0, timeLimit=30, gapRel=0.05))
 
     if LpStatus[prob.status] != 'Optimal':
         reasons.append({

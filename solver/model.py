@@ -128,16 +128,17 @@ def solve(payload: dict) -> dict:
 
     penalty = []
 
-    # S1 — Contracted hours deviation (highest priority)
-    over = LpVariable.dicts('over', WIDs, lowBound=0)
+    # S1 — Contracted hours: never exceed the target (hard), get as close as
+    # possible from below (soft). This guarantees nobody is scheduled past their
+    # required hours, and the solver fills up to the best the shift blocks allow.
     under = LpVariable.dicts('under', WIDs, lowBound=0)
     for w_data in workers:
         w = w_data['id']
         actual = lpSum(sm[s]['hours'] * x[(w, d, s)] for d in D for s in SIDs)
         target = w_data.get('contracted_hours', 40)
-        prob += over[w] >= actual - target
+        prob += actual <= target            # HARD: never go over the required hours
         prob += under[w] >= target - actual
-        penalty.append(W_HOURS * (over[w] + under[w]))
+        penalty.append(W_HOURS * under[w])
 
     # y[w][s] = 1 if worker w uses shift s at any point this week (for S2 and S5)
     y = None
@@ -189,11 +190,33 @@ def solve(payload: dict) -> dict:
 
     prob += lpSum(penalty) if penalty else 0
 
-    prob.solve(PULP_CBC_CMD(msg=0, timeLimit=120))
+    # gapRel lets CBC stop as soon as the incumbent is within 3% of the proven
+    # bound instead of grinding to exact optimality — usually orders of magnitude
+    # faster with a visually identical schedule.
+    prob.solve(PULP_CBC_CMD(msg=0, timeLimit=90, gapRel=0.03))
 
     status = LpStatus[prob.status]
+    sol_status = getattr(prob, 'sol_status', None)
 
-    if status != 'Optimal':
+    def _has_incumbent() -> bool:
+        for w in WIDs:
+            for d in D:
+                for s in SIDs:
+                    if value(x[(w, d, s)]) is not None:
+                        return True
+        return False
+
+    # Accept a proven optimum, an integer-feasible incumbent, or a time-limited
+    # solve that still produced a usable schedule. Only report infeasible when the
+    # model genuinely has no solution — otherwise a good schedule found just before
+    # the time limit would be thrown away (and trigger a wasteful diagnostic solve).
+    feasible = (
+        status == 'Optimal'
+        or sol_status in (1, 2)  # LpSolutionOptimal / LpSolutionIntegerFeasible
+        or (status == 'Not Solved' and _has_incumbent())
+    )
+
+    if not feasible:
         return {'status': 'infeasible', 'assignments': None, 'objective': None}
 
     assignments = {}
