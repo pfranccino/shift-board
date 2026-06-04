@@ -12,7 +12,69 @@ import type { Worker, Role } from '../types';
 interface Props {
   workers: Worker[];
   setWorkers: React.Dispatch<React.SetStateAction<Worker[]>>;
+  onBulkAdd?: (names: string[]) => Promise<void>;
   dark: boolean;
+}
+
+function BulkModal({ dark, onAdd, onClose }: {
+  dark: boolean;
+  onAdd: (names: string[]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
+  const names = text.split('\n').map((n) => n.trim()).filter(Boolean);
+
+  const handle = async () => {
+    if (!names.length) return;
+    setLoading(true);
+    await onAdd(names).catch(() => {});
+    setLoading(false);
+    onClose();
+  };
+
+  return (
+    <Dialog open onClose={onClose} PaperProps={{
+      sx: { borderRadius: '16px', width: '100%', maxWidth: 420, background: dark ? 'oklch(0.225 0.009 260)' : 'oklch(1 0 0)', border: `1px solid ${border}` }
+    }}>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 0, fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 16, fontWeight: 600 }}>
+        Cargar lista
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', display: 'grid', placeItems: 'center', padding: 4 }}>
+          <Icon name="x" size={16} />
+        </button>
+      </DialogTitle>
+      <DialogContent sx={{ pt: '16px !important' }}>
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-2)', lineHeight: 1.5 }}>
+          Un nombre por línea. Se crean con turno completo (40h) sin asignación inicial.
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={'Benjamin\nDiego\nCristian\nEduardo'}
+          rows={8}
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: 9,
+            border: `1px solid ${border}`, background: dark ? 'oklch(0.255 0.009 260)' : 'oklch(0.985 0.003 250)',
+            color: 'var(--text-1)', fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
+            fontSize: 13, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+      </DialogContent>
+      <DialogActions sx={{ px: 2.5, pb: 2.5, gap: 1 }}>
+        <button onClick={onClose} style={{ padding: '8px 14px', borderRadius: 9, border: `1px solid ${border}`, background: 'transparent', color: 'var(--text-2)', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+          Cancelar
+        </button>
+        <button onClick={handle} disabled={!names.length || loading} style={{
+          padding: '8px 14px', borderRadius: 9, border: 'none', background: '#4664c9', color: 'white',
+          fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13,
+          cursor: names.length && !loading ? 'pointer' : 'not-allowed', opacity: names.length && !loading ? 1 : 0.5,
+        }}>
+          {loading ? 'Cargando…' : names.length > 0 ? `Cargar ${names.length} trabajador${names.length === 1 ? '' : 'es'}` : 'Cargar'}
+        </button>
+      </DialogActions>
+    </Dialog>
+  );
 }
 
 function Seg({ options, value, onChange }: { options: { key: string; label: string | React.ReactNode }[]; value: string; onChange: (k: string) => void }) {
@@ -155,8 +217,9 @@ function WorkerModal({ initial, dark, onSave, onClose }: {
   );
 }
 
-export function TrabajadoresView({ workers, setWorkers, dark }: Props) {
+export function TrabajadoresView({ workers, setWorkers, onBulkAdd, dark }: Props) {
   const [modal, setModal] = useState<{ worker?: Worker } | null>(null);
+  const [bulkModal, setBulkModal] = useState(false);
   const [query, setQuery] = useState('');
   const [confirm, setConfirm] = useState<Worker | null>(null);
 
@@ -196,6 +259,15 @@ export function TrabajadoresView({ workers, setWorkers, dark }: Props) {
               style={{ border: 'none', background: 'none', outline: 'none', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 13, color: 'var(--text-1)', width: 150 }}
             />
           </div>
+          {onBulkAdd && (
+            <button onClick={() => setBulkModal(true)} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 14px',
+              borderRadius: 9, border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)',
+              fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13, cursor: 'pointer',
+            }}>
+              <Icon name="users" size={15} /> Cargar lista
+            </button>
+          )}
           <button onClick={() => setModal({})} style={{
             display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 14px',
             borderRadius: 9, border: 'none', background: accent, color: 'white',
@@ -288,6 +360,10 @@ export function TrabajadoresView({ workers, setWorkers, dark }: Props) {
         <div style={{ textAlign: 'center', padding: 60, color: text3, fontSize: 14 }}>
           Sin resultados para "{query}".
         </div>
+      )}
+
+      {bulkModal && onBulkAdd && (
+        <BulkModal dark={dark} onAdd={onBulkAdd} onClose={() => setBulkModal(false)} />
       )}
 
       {modal !== null && (

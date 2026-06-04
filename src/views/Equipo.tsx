@@ -1,17 +1,14 @@
 import { useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import { initials, avatarBg } from '../data';
 import { Icon } from '../components/Icon';
-import type { MockUser, MockOrg, MockMember, MockInvitation, OrgRole } from '../types';
+import type { MockUser, MockOrg, MockMember } from '../types';
 
 interface Props {
   currentUser: MockUser;
   org: MockOrg;
   members: MockMember[];
-  invitations: MockInvitation[];
-  onInvite: (email: string, role: OrgRole) => Promise<MockInvitation>;
-  onRemoveMember: (memberId: string) => void;
-  onCancelInvite: (inviteId: string) => void;
+  onRemoveMember: (memberId: string) => Promise<void> | void;
   isSuperAdmin: boolean;
   dark: boolean;
 }
@@ -23,199 +20,24 @@ const ROLE_LABEL: Record<OrgRole, string> = {
   employee: 'Empleado',
 };
 
+type OrgRole = 'owner' | 'admin' | 'manager' | 'employee';
 const ROLE_HUE: Record<OrgRole, number> = { owner: 250, admin: 35, manager: 145, employee: 145 };
 
-function RoleSeg({ value, onChange, allowOwner }: { value: OrgRole; onChange: (r: OrgRole) => void; allowOwner?: boolean }) {
-  const opts: OrgRole[] = allowOwner ? ['owner', 'admin', 'manager', 'employee'] : ['admin', 'manager', 'employee'];
-  return (
-    <div style={{ display: 'flex', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 9, padding: 3, gap: 2 }}>
-      {opts.map((r) => {
-        const on = r === value;
-        return (
-          <button key={r} onClick={() => onChange(r as OrgRole)} style={{
-            flex: 1, padding: '6px 12px', border: 'none', borderRadius: 6,
-            background: on ? 'var(--surface)' : 'transparent',
-            color: on ? 'var(--text-1)' : 'var(--text-2)',
-            boxShadow: on ? 'var(--shadow-sm)' : 'none',
-            fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-            fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-          }}>
-            {ROLE_LABEL[r]}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function InviteModal({ dark, onInvite, onClose, allowOwner }: {
-  dark: boolean;
-  onInvite: (email: string, role: OrgRole) => Promise<MockInvitation>;
-  onClose: () => void;
-  allowOwner?: boolean;
-}) {
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<OrgRole>('manager');
-  const [generated, setGenerated] = useState<MockInvitation | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [genError, setGenError] = useState<string | null>(null);
-
-  const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
-  const text3 = dark ? 'oklch(0.58 0.008 260)' : 'oklch(0.62 0.008 260)';
-  const surface2 = dark ? 'oklch(0.255 0.009 260)' : 'oklch(0.985 0.003 250)';
-
-  const inviteLink = generated ? `https://shiftboard.app/join?token=${generated.token}` : '';
-
-  const handleGenerate = async () => {
-    if (!email.trim().includes('@') || generating) return;
-    setGenerating(true);
-    setGenError(null);
-    try {
-      const inv = await onInvite(email.trim().toLowerCase(), role);
-      setGenerated(inv);
-    } catch {
-      setGenError('No se pudo generar la invitación. Intenta nuevamente.');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(inviteLink).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  const inputSx = {
-    '& .MuiOutlinedInput-root': {
-      borderRadius: '9px', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 13.5,
-      background: dark ? 'oklch(0.255 0.009 260)' : 'oklch(0.985 0.003 250)',
-    },
-  };
-
-  return (
-    <Dialog open onClose={onClose} PaperProps={{
-      sx: { borderRadius: '16px', width: '100%', maxWidth: 440, background: dark ? 'oklch(0.225 0.009 260)' : 'oklch(1 0 0)', border: `1px solid ${border}` }
-    }}>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 0, fontFamily: '"IBM Plex Sans"', fontSize: 16, fontWeight: 600 }}>
-        Invitar al equipo
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', display: 'grid', placeItems: 'center', padding: 4 }}>
-          <Icon name="x" size={16} />
-        </button>
-      </DialogTitle>
-      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '16px !important' }}>
-        {!generated ? (
-          <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Correo electrónico</span>
-              <TextField
-                autoFocus type="email" value={email} placeholder="manager@negocio.com"
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
-                sx={inputSx} size="small" fullWidth
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Rol</span>
-              <RoleSeg value={role} onChange={setRole} allowOwner={allowOwner} />
-              <div style={{ fontSize: 11.5, color: text3, lineHeight: 1.4 }}>
-                {role === 'owner'
-                  ? 'Control total de la organización. Puede gestionar miembros y configuración.'
-                  : role === 'admin'
-                  ? 'Puede invitar gerentes, editar configuración y ver todo.'
-                  : 'Puede crear y editar turnos y trabajadores. No puede invitar.'}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, background: `color-mix(in oklch, oklch(0.65 0.15 145) 8%, transparent)`, border: `1px solid color-mix(in oklch, oklch(0.65 0.15 145) 25%, transparent)` }}>
-              <Icon name="check" size={18} style={{ color: 'oklch(0.55 0.15 145)', flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Invitación generada</div>
-                <div style={{ fontSize: 12, color: text3 }}>Envía este enlace a <strong>{generated.email}</strong></div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Enlace de invitación</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <div style={{
-                  flex: 1, padding: '8px 12px', borderRadius: 9, background: surface2,
-                  border: `1px solid ${border}`, fontSize: 12, color: text3,
-                  fontFamily: '"IBM Plex Mono", monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {inviteLink}
-                </div>
-                <button onClick={handleCopy} style={{
-                  padding: '8px 12px', borderRadius: 9, border: `1px solid ${border}`,
-                  background: copied ? `color-mix(in oklch, oklch(0.65 0.15 145) 12%, transparent)` : 'transparent',
-                  color: copied ? 'oklch(0.55 0.15 145)' : 'var(--text-2)',
-                  fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
-                  fontSize: 12.5, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
-                  transition: 'background .15s, color .15s',
-                }}>
-                  <Icon name={copied ? 'check' : 'copy'} size={13} /> {copied ? 'Copiado' : 'Copiar'}
-                </button>
-              </div>
-            </div>
-            <p style={{ margin: 0, fontSize: 12, color: text3, lineHeight: 1.5 }}>
-              El enlace expira en 7 días. El invitado creará su cuenta al abrirlo.
-            </p>
-          </div>
-        )}
-      </DialogContent>
-      <DialogActions sx={{ px: 2.5, pb: 2.5, gap: 1 }}>
-        <button onClick={onClose} style={{ padding: '8px 14px', borderRadius: 9, border: `1px solid ${border}`, background: 'transparent', color: 'var(--text-2)', fontFamily: '"IBM Plex Sans"', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
-          {generated ? 'Cerrar' : 'Cancelar'}
-        </button>
-        {!generated && (
-          <>
-            {genError && <span style={{ fontSize: 12, color: '#e53935' }}>{genError}</span>}
-            <button onClick={handleGenerate} disabled={!email.trim().includes('@') || generating} style={{
-              padding: '8px 14px', borderRadius: 9, border: 'none', background: '#4664c9', color: 'white',
-              fontFamily: '"IBM Plex Sans"', fontWeight: 500, fontSize: 13,
-              cursor: email.trim().includes('@') && !generating ? 'pointer' : 'not-allowed',
-              opacity: email.trim().includes('@') && !generating ? 1 : 0.5,
-            }}>
-              {generating ? 'Generando…' : 'Generar invitación'}
-            </button>
-          </>
-        )}
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-export function EquipoView({ currentUser, org, members, invitations, onInvite, onRemoveMember, onCancelInvite, isSuperAdmin, dark }: Props) {
-  const [inviteModal, setInviteModal] = useState(false);
+export function EquipoView({ currentUser, org, members, onRemoveMember, isSuperAdmin, dark }: Props) {
+  void isSuperAdmin;
   const [confirm, setConfirm] = useState<MockMember | null>(null);
 
   const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
   const text3 = dark ? 'oklch(0.58 0.008 260)' : 'oklch(0.62 0.008 260)';
   const accent = '#4664c9';
 
-  const canInvite = members.find((m) => m.id === currentUser.id)?.role !== 'manager';
-
   return (
     <div className="view-pad">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 22, flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Equipo</h1>
-          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>
-            {org.name} · {members.length} {members.length === 1 ? 'miembro' : 'miembros'}
-          </p>
-        </div>
-        {canInvite && (
-          <button onClick={() => setInviteModal(true)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 14px',
-            borderRadius: 9, border: 'none', background: accent, color: 'white',
-            fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 500, fontSize: 13, cursor: 'pointer',
-          }}>
-            <Icon name="plus" size={15} stroke={2.2} /> Invitar miembro
-          </button>
-        )}
+      <div style={{ marginBottom: 22 }}>
+        <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Equipo</h1>
+        <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>
+          {org.name} · {members.length} {members.length === 1 ? 'miembro' : 'miembros'}
+        </p>
       </div>
 
       {/* Members */}
@@ -226,7 +48,7 @@ export function EquipoView({ currentUser, org, members, invitations, onInvite, o
         {members.map((m, i) => {
           const hue = ROLE_HUE[m.role];
           const isMe = m.id === currentUser.id;
-          const canRemove = !isMe && m.role !== 'owner' && canInvite;
+          const canRemove = !isMe && m.role !== 'owner';
           return (
             <div key={m.id} style={{
               display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px',
@@ -265,41 +87,6 @@ export function EquipoView({ currentUser, org, members, invitations, onInvite, o
           );
         })}
       </div>
-
-      {/* Pending invitations */}
-      {invitations.length > 0 && (
-        <div style={{ background: 'var(--surface)', border: `1px solid ${border}`, borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: `1px solid ${border}` }}>
-            <h3 style={{ margin: 0, fontSize: 13.5, fontWeight: 600 }}>Invitaciones pendientes</h3>
-          </div>
-          {invitations.map((inv, i) => (
-            <div key={inv.id} style={{
-              display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px',
-              borderBottom: i < invitations.length - 1 ? `1px solid ${border}` : 'none',
-            }}>
-              <span style={{ width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'var(--surface-2)', border: `1px solid ${border}`, color: text3, flexShrink: 0 }}>
-                <Icon name="mail" size={16} />
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inv.email}</div>
-                <div style={{ fontSize: 11.5, color: text3, marginTop: 2 }}>Pendiente · {ROLE_LABEL[inv.role]}</div>
-              </div>
-              <button onClick={() => onCancelInvite(inv.id)} style={{
-                padding: '5px 10px', borderRadius: 8, border: `1px solid ${border}`,
-                background: 'transparent', color: 'var(--text-2)',
-                fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12, cursor: 'pointer',
-              }}>
-                Cancelar
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Invite modal */}
-      {inviteModal && (
-        <InviteModal dark={dark} onInvite={onInvite} onClose={() => setInviteModal(false)} allowOwner={isSuperAdmin} />
-      )}
 
       {/* Confirm remove */}
       {confirm && (

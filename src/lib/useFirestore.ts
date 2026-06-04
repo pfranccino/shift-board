@@ -184,6 +184,14 @@ export function useAllOrgs() {
   return useCollection<{ id: string; name: string; created_at?: any }>('organizations');
 }
 
+export async function removeMember(orgId: string, memberId: string): Promise<void> {
+  if (!fbDb) throw new Error('Firestore not initialized');
+  await Promise.all([
+    deleteDoc(doc(fbDb, `organizations/${orgId}/members/${memberId}`)),
+    deleteDoc(doc(fbDb, `memberships/${memberId}_${orgId}`)),
+  ]);
+}
+
 export async function bulkSaveWorkers(orgId: string, names: string[]): Promise<void> {
   if (!fbDb) throw new Error('Firestore not initialized');
   const days: DayKey[] = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { ThemeProvider, CssBaseline, GlobalStyles } from '@mui/material';
 import { createAppTheme } from './theme';
 import {
@@ -10,9 +10,10 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
 import { isFirebaseConfigured, fbAuth, fbDb } from './lib/firebase';
 import {
-  useOrgWorkers, useWeekSchedule,
-  saveWorker, updateWorker as fbUpdateWorker, deleteWorker as fbDeleteWorker,
-  saveWeekSchedule, saveOrg, saveMembership, saveInvitation,
+  useOrgWorkers, useOrgConfig, useOrgSolverConfig, useOrgMembers,
+  useWeekSchedule, saveWorker, updateWorker as fbUpdateWorker,
+  deleteWorker as fbDeleteWorker, saveWeekSchedule, saveOrg,
+  saveMembership, saveConfig, saveSolverConfig, removeMember, bulkSaveWorkers,
 } from './lib/useFirestore';
 import { Icon } from './components/Icon';
 import { TurnosView } from './views/Turnos';
@@ -32,7 +33,7 @@ import { MgInicio, MgEquipo, MgSolicitudes, MgTurnos } from './views/Supervisor'
 import { EmSemana, EmHoras, EmCambio, EmLibre, EmDisponibilidad } from './views/Employee';
 import { initials, avatarBg, hueColors, kindColors } from './data';
 import { PLATFORM_ROLES } from './data/platform';
-import type { Worker, Config, SolverConfig, MockUser, MockOrg, MockMember, MockInvitation, OrgRole, WeekSchedules, DayKey, UserRole } from './types';
+import type { Worker, Config, SolverConfig, MockUser, MockOrg, MockMember, OrgRole, WeekSchedules, DayKey, UserRole } from './types';
 
 type Tab = 'turnos' | 'asistente' | 'trabajadores' | 'estadisticas' | 'configuracion' | 'equipo';
 
@@ -174,8 +175,7 @@ export default function App() {
   const [org, setOrg] = useState<MockOrg | null>(
     () => isFirebaseConfigured ? null : loadJson('sb_org', null)
   );
-  const [members, setMembers] = useState<MockMember[]>(() => loadJson('sb_members', []));
-  const [invitations, setInvitations] = useState<MockInvitation[]>(() => loadJson('sb_invites', []));
+  const [localMembers, setLocalMembers] = useState<MockMember[]>(() => loadJson('sb_members', []));
   const [isSuperAdmin, setIsSuperAdmin] = useState(() => !isFirebaseConfigured);
   const [inviteToken] = useState(() => new URLSearchParams(window.location.search).get('token'));
   const [selectedWeek, setSelectedWeek] = useState<string>(() => getCurrentWeekKey());
@@ -198,14 +198,35 @@ export default function App() {
   // Firestore real-time hooks (no-ops when org.id is empty)
   const firestoreWorkers = useOrgWorkers(org?.id ?? '');
   const firestoreSchedules = useWeekSchedule(org?.id ?? '', selectedWeek);
+  const firestoreConfig = useOrgConfig(org?.id ?? '');
+  const firestoreSolverCfg = useOrgSolverConfig(org?.id ?? '');
+  const firestoreMembers = useOrgMembers(org?.id ?? '');
 
   // Derived — use Firestore when configured and org is loaded, else local
   const workers: Worker[] = isFirebaseConfigured && org ? firestoreWorkers : localWorkers;
   const schedules: WeekSchedules = isFirebaseConfigured && org ? firestoreSchedules : localSchedules;
+  const members: MockMember[] = isFirebaseConfigured && org ? firestoreMembers : localMembers;
 
   buildRegistry(config);
 
   const theme = useMemo(() => createAppTheme(dark), [dark]);
+
+  // Config/SolverConfig: initialize from Firestore once per org, then keep in sync
+  const configOrgRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (firestoreConfig && org && configOrgRef.current !== org.id) {
+      configOrgRef.current = org.id;
+      setConfig(firestoreConfig);
+    }
+  }, [firestoreConfig, org?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const solverOrgRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (firestoreSolverCfg && org && solverOrgRef.current !== org.id) {
+      solverOrgRef.current = org.id;
+      setSolverConfig(firestoreSolverCfg);
+    }
+  }, [firestoreSolverCfg, org?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Theme + UI persistence ──────────────────────────────────────────────
   useEffect(() => {
@@ -220,8 +241,14 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toastState]);
   const toast = (msg: string, kind = 'ok') => setToastState({ msg, kind, id: Date.now() });
-  useEffect(() => { localStorage.setItem('sb_config_v2', JSON.stringify(config)); }, [config]);
-  useEffect(() => { localStorage.setItem('sb_solver_v1', JSON.stringify(solverConfig)); }, [solverConfig]);
+  useEffect(() => {
+    localStorage.setItem('sb_config_v2', JSON.stringify(config));
+    if (isFirebaseConfigured && org) saveConfig(org.id, config).catch(() => {});
+  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    localStorage.setItem('sb_solver_v1', JSON.stringify(solverConfig));
+    if (isFirebaseConfigured && org) saveSolverConfig(org.id, solverConfig).catch(() => {});
+  }, [solverConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Mock-only localStorage persistence ─────────────────────────────────
   useEffect(() => {
@@ -231,11 +258,8 @@ export default function App() {
     if (!isFirebaseConfigured) localStorage.setItem('sb_org', JSON.stringify(org));
   }, [org]);
   useEffect(() => {
-    if (!isFirebaseConfigured) localStorage.setItem('sb_members', JSON.stringify(members));
-  }, [members]);
-  useEffect(() => {
-    if (!isFirebaseConfigured) localStorage.setItem('sb_invites', JSON.stringify(invitations));
-  }, [invitations]);
+    if (!isFirebaseConfigured) localStorage.setItem('sb_members', JSON.stringify(localMembers));
+  }, [localMembers]);
   useEffect(() => {
     if (!isFirebaseConfigured) localStorage.setItem('sb_workers_v2', JSON.stringify(localWorkers));
   }, [localWorkers]);
@@ -359,7 +383,7 @@ export default function App() {
       await saveOrg(newOrg.id, newOrg);
       await saveMembership(newOrg.id, owner);
     }
-    setMembers([owner]);
+    setLocalMembers([owner]);
     setOrg(newOrg);
   };
 
@@ -367,26 +391,11 @@ export default function App() {
     if (isFirebaseConfigured && fbAuth) await signOut(fbAuth);
     setAuthUser(null);
     setOrg(null);
-    setMembers([]);
-    setInvitations([]);
+    setLocalMembers([]);
     setScreen('login');
     if (!isFirebaseConfigured) {
-      ['sb_user', 'sb_org', 'sb_members', 'sb_invites'].forEach((k) => localStorage.removeItem(k));
+      ['sb_user', 'sb_org', 'sb_members'].forEach((k) => localStorage.removeItem(k));
     }
-  };
-
-  const handleInvite = async (email: string, role: OrgRole): Promise<MockInvitation> => {
-    const token = Math.random().toString(36).slice(2, 10).toUpperCase();
-    const inv: MockInvitation = {
-      id: `inv_${Date.now()}`, email, role, token,
-      orgId: org!.id, orgName: org!.name,
-      createdAt: new Date().toISOString(),
-    };
-    if (isFirebaseConfigured && org) {
-      await saveInvitation(token, { email, role, orgId: org.id, orgName: org.name });
-    }
-    setInvitations((prev) => [...prev, inv]);
-    return inv;
   };
 
   const handleJoinOrg = async (token: string): Promise<void> => {
@@ -399,7 +408,6 @@ export default function App() {
     const orgSnap = await getDoc(doc(fbDb, `organizations/${inv.orgId}`));
     if (!orgSnap.exists()) throw new Error('La organización no existe.');
     setOrg({ id: orgSnap.id, name: orgSnap.data().name });
-    setMembers([member]);
     window.history.replaceState({}, '', window.location.pathname);
   };
 
@@ -462,8 +470,23 @@ export default function App() {
     if (isFirebaseConfigured) {
       try { await saveOrg(newOrg.id, newOrg); await saveMembership(newOrg.id, owner); } catch { /* handled by Firebase listener */ }
     }
-    setMembers([owner]);
+    setLocalMembers([owner]);
     setOrg(newOrg);
+  };
+
+  const handleBulkAdd = async (names: string[]) => {
+    if (isFirebaseConfigured && org) {
+      await bulkSaveWorkers(org.id, names);
+    } else {
+      setLocalWorkers((prev) => [
+        ...prev,
+        ...names.map((name) => ({
+          id: `w${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+          name, cat: '', role: 'full' as const,
+          contracted_hours: 40, shifts: blankShifts() as Worker['shifts'],
+        })),
+      ]);
+    }
   };
 
   const s = summarize(workers);
@@ -725,16 +748,17 @@ export default function App() {
               onApplySchedule={handleApplySchedule} dark={dark}
               goTab={(t) => setTab(t)} orgId={org?.id} solverConfig={solverConfig} />
           )}
-          {effectiveRole === 'admin' && tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={handleSetWorkers} dark={dark} />}
+          {effectiveRole === 'admin' && tab === 'trabajadores' && <TrabajadoresView workers={displayWorkers} setWorkers={handleSetWorkers} onBulkAdd={handleBulkAdd} dark={dark} />}
           {effectiveRole === 'admin' && tab === 'estadisticas'  && <EstadisticasView  workers={displayWorkers} dark={dark} />}
           {effectiveRole === 'admin' && tab === 'configuracion' && (
             <ConfiguracionView config={config} setConfig={setConfig} solverConfig={solverConfig} setSolverConfig={setSolverConfig} workers={workers} setWorkers={handleSetWorkers} dark={dark} />
           )}
           {effectiveRole === 'admin' && tab === 'equipo' && authUser && org && (
-            <EquipoView currentUser={authUser} org={org} members={members} invitations={invitations}
-              onInvite={handleInvite}
-              onRemoveMember={(id) => setMembers((prev) => prev.filter((m) => m.id !== id))}
-              onCancelInvite={(id) => setInvitations((prev) => prev.filter((i) => i.id !== id))}
+            <EquipoView currentUser={authUser} org={org} members={members}
+              onRemoveMember={async (id) => {
+                if (isFirebaseConfigured && org) await removeMember(org.id, id).catch(() => {});
+                else setLocalMembers((prev) => prev.filter((m) => m.id !== id));
+              }}
               isSuperAdmin={isSuperAdmin} dark={dark} />
           )}
 
