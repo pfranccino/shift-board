@@ -72,6 +72,28 @@ export function useJobStatus(orgId: string, jobId: string | null) {
   return status;
 }
 
+export function useMultipleJobStatus(orgId: string, jobIds: string[]) {
+  const [statuses, setStatuses] = useState<Record<string, {
+    status: string;
+    result: { assignments: Record<string, Record<DayKey, string>> } | null;
+    infeasibility_reasons: any[] | null;
+    error: string | null;
+  }>>({});
+
+  const key = jobIds.join(',');
+  useEffect(() => {
+    if (!fbDb || !orgId || jobIds.length === 0) { setStatuses({}); return; }
+    const unsubs = jobIds.map((jobId) =>
+      onSnapshot(doc(fbDb!, `organizations/${orgId}/jobs/${jobId}`), (snap) => {
+        if (snap.exists()) setStatuses((prev) => ({ ...prev, [jobId]: snap.data() as any }));
+      })
+    );
+    return () => unsubs.forEach((u) => u());
+  }, [orgId, key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return statuses;
+}
+
 // ── Firestore write helpers ───────────────────────────────────────────────
 
 export async function saveWorker(orgId: string, worker: Omit<Worker, 'id'>) {

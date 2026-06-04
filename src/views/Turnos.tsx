@@ -3,17 +3,19 @@ import {
   getShift, getShiftIds, getCatIds, getCat, getCoverage,
   shiftColors, catColors, statusColors, complianceStatus, coverageMatrix,
   initials, avatarBg, DAYS, ROLES, getWeekDates, formatWeekRange, isToday,
+  weekKeyFromDate, weekKeyToMonthYear, formatMonthYear, getMonthDays,
 } from '../data';
 import { ShiftChip } from '../components/ShiftChip';
 import { HoursBar } from '../components/HoursBar';
 import { Icon } from '../components/Icon';
-import type { Worker } from '../types';
+import type { Worker, DayKey } from '../types';
 
 interface Props {
   workers: Worker[];
   selectedWeek: string;
   onPrevWeek: () => void;
   onNextWeek: () => void;
+  onSelectWeek?: (weekKey: string) => void;
   onAssign: (workerId: string, dayKey: string, shiftKey: string) => void;
   dark: boolean;
 }
@@ -197,9 +199,151 @@ function CoveragePanel({ workers, days, dark }: { workers: Worker[]; days: typeo
   );
 }
 
-export function TurnosView({ workers, selectedWeek, onPrevWeek, onNextWeek, onAssign, dark }: Props) {
+function getDayKeyForDate(d: Date, weekDates: Record<DayKey, Date>): DayKey | null {
+  const s = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+  for (const [k, wd] of Object.entries(weekDates) as [DayKey, Date][]) {
+    if (`${wd.getUTCFullYear()}-${wd.getUTCMonth()}-${wd.getUTCDate()}` === s) return k;
+  }
+  return null;
+}
+
+function MonthCalendar({ workers, selectedWeek, onSelectWeek, dark }: {
+  workers: Worker[];
+  selectedWeek: string;
+  onSelectWeek: (wk: string) => void;
+  dark: boolean;
+}) {
+  const [my, setMy] = useState(() => weekKeyToMonthYear(selectedWeek));
+
+  useEffect(() => { setMy(weekKeyToMonthYear(selectedWeek)); }, [selectedWeek]);
+
+  const { year, month } = my;
+  const days = getMonthDays(year, month);
+  const weekDates = getWeekDates(selectedWeek);
+
+  const selectedDates = new Set(
+    Object.values(weekDates).map((d) => `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`)
+  );
+
+  const firstDay = days[0];
+  const dow = firstDay.getUTCDay() || 7;
+  const gridStart = new Date(firstDay);
+  gridStart.setUTCDate(firstDay.getUTCDate() - dow + 1);
+
+  const grid: Date[] = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(gridStart); d.setUTCDate(gridStart.getUTCDate() + i); return d;
+  });
+  const rows: Date[][] = [];
+  for (let i = 0; i < 6; i++) {
+    const row = grid.slice(i * 7, (i + 1) * 7);
+    if (i === 5 && row.every((d) => d.getUTCMonth() !== month)) break;
+    rows.push(row);
+  }
+
+  const prevMonth = () => setMy(({ year: y, month: m }) => m === 0 ? { year: y - 1, month: 11 } : { year: y, month: m - 1 });
+  const nextMonth = () => setMy(({ year: y, month: m }) => m === 11 ? { year: y + 1, month: 0 } : { year: y, month: m + 1 });
+
+  const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
+  const text3 = dark ? 'oklch(0.58 0.008 260)' : 'oklch(0.62 0.008 260)';
+  const surface2 = dark ? 'oklch(0.255 0.009 260)' : 'oklch(0.985 0.003 250)';
+  const accent = '#4664c9';
+
+  const DAY_HEADERS = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+  return (
+    <div style={{ border: `1px solid ${border}`, borderRadius: 14, background: 'var(--surface)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
+      {/* Month nav */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: `1px solid ${border}`, background: surface2 }}>
+        <button onClick={prevMonth} style={{ display: 'grid', placeItems: 'center', width: 30, height: 30, borderRadius: 7, border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer' }}>
+          <Icon name="chevL" size={15} />
+        </button>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{formatMonthYear(year, month)}</span>
+        <button onClick={nextMonth} style={{ display: 'grid', placeItems: 'center', width: 30, height: 30, borderRadius: 7, border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer' }}>
+          <Icon name="chevR" size={15} />
+        </button>
+      </div>
+
+      {/* Day headers */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: `1px solid ${border}` }}>
+        {DAY_HEADERS.map((h, i) => (
+          <div key={h} style={{ textAlign: 'center', padding: '8px 4px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: i >= 5 ? accent + 'aa' : text3 }}>
+            {h}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar grid */}
+      {rows.map((row, ri) => (
+        <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: ri < rows.length - 1 ? `1px solid ${border}` : 'none' }}>
+          {row.map((d, ci) => {
+            const inMonth = d.getUTCMonth() === month;
+            const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+            const inSelected = selectedDates.has(key);
+            const today = isToday(d);
+            const weekend = ci >= 5;
+            const dayKey = inSelected ? getDayKeyForDate(d, weekDates) : null;
+
+            const shiftCounts: { sid: string; count: number }[] = [];
+            if (dayKey) {
+              const counts: Record<string, number> = {};
+              workers.forEach((w) => {
+                const sk = w.shifts[dayKey as DayKey];
+                if (sk && sk !== 'libre') counts[sk] = (counts[sk] || 0) + 1;
+              });
+              Object.entries(counts).forEach(([sid, count]) => shiftCounts.push({ sid, count }));
+            }
+
+            return (
+              <div
+                key={ci}
+                onClick={() => { if (!inSelected && inMonth) onSelectWeek(weekKeyFromDate(d)); }}
+                style={{
+                  minHeight: 76, padding: '8px 10px', cursor: (!inSelected && inMonth) ? 'pointer' : 'default',
+                  background: inSelected ? `color-mix(in oklch, ${accent} 8%, var(--surface))` : weekend ? 'var(--surface-2)' : 'var(--surface)',
+                  borderLeft: ci > 0 ? `1px solid ${border}` : 'none',
+                  outline: inSelected ? `2px solid ${accent}33` : 'none',
+                  outlineOffset: '-2px',
+                  opacity: inMonth ? 1 : 0.35,
+                  transition: 'background .1s',
+                }}
+                onMouseEnter={(e) => { if (!inSelected && inMonth) (e.currentTarget as HTMLElement).style.background = 'var(--hover)'; }}
+                onMouseLeave={(e) => { if (!inSelected && inMonth) (e.currentTarget as HTMLElement).style.background = weekend ? 'var(--surface-2)' : 'var(--surface)'; }}
+              >
+                <div style={{
+                  fontFamily: '"IBM Plex Mono", monospace', fontSize: 12, fontWeight: today ? 700 : 500,
+                  color: today ? accent : inMonth ? 'var(--text-1)' : text3,
+                  marginBottom: 6,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  {d.getUTCDate()}
+                  {today && <span style={{ width: 5, height: 5, borderRadius: 99, background: accent }} />}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {shiftCounts.map(({ sid, count }) => {
+                    const c = shiftColors(sid, dark);
+                    return (
+                      <div key={sid} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: 2, background: c.dot, flexShrink: 0 }} />
+                        <span style={{ fontSize: 10.5, color: c.fg, fontFamily: '"IBM Plex Mono", monospace', whiteSpace: 'nowrap' }}>
+                          {getShift(sid).abbr} {count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function TurnosView({ workers, selectedWeek, onPrevWeek, onNextWeek, onSelectWeek, onAssign, dark }: Props) {
   const [active, setActive] = useState<ActiveCell | null>(null);
   const [catFilter, setCatFilter] = useState('Todas');
+  const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
 
   const cats = [{ key: 'Todas', label: 'Todas' }, ...getCatIds().map((id) => ({ key: id, label: getCat(id).name }))];
   const days = DAYS;
@@ -223,26 +367,48 @@ export function TurnosView({ workers, selectedWeek, onPrevWeek, onNextWeek, onAs
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 22, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Cuadro de turnos</h1>
-          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>{formatWeekRange(selectedWeek)} · Clic en una celda para asignar</p>
+          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>
+            {viewMode === 'week' ? `${formatWeekRange(selectedWeek)} · Clic en una celda para asignar` : 'Vista mensual · Clic en una semana para cargar datos'}
+          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <button onClick={onPrevWeek} style={{
-              display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8,
-              border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer',
-            }} aria-label="Semana anterior"><Icon name="chevL" size={16} /></button>
-            <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12, padding: '0 6px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{selectedWeek}</span>
-            <button onClick={onNextWeek} style={{
-              display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8,
-              border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer',
-            }} aria-label="Semana siguiente"><Icon name="chevR" size={16} /></button>
-          </div>
-          <Seg options={cats} value={catFilter} onChange={setCatFilter} />
+          {/* Vista toggle */}
+          <Seg
+            options={[{ key: 'week', label: 'Semana' }, { key: 'month', label: 'Mes' }]}
+            value={viewMode}
+            onChange={(v) => { setViewMode(v as 'week' | 'month'); setActive(null); }}
+          />
+          {viewMode === 'week' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <button onClick={onPrevWeek} style={{
+                  display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8,
+                  border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer',
+                }} aria-label="Semana anterior"><Icon name="chevL" size={16} /></button>
+                <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12, padding: '0 6px', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>{selectedWeek}</span>
+                <button onClick={onNextWeek} style={{
+                  display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8,
+                  border: `1px solid ${border}`, background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer',
+                }} aria-label="Semana siguiente"><Icon name="chevR" size={16} /></button>
+              </div>
+              <Seg options={cats} value={catFilter} onChange={setCatFilter} />
+            </>
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      <div style={{ border: `1px solid ${border}`, borderRadius: 14, overflow: 'auto', background: 'var(--surface)', boxShadow: 'var(--shadow-sm)' }}>
+      {/* Month view */}
+      {viewMode === 'month' && (
+        <MonthCalendar
+          workers={workers}
+          selectedWeek={selectedWeek}
+          onSelectWeek={(wk) => { onSelectWeek?.(wk); setViewMode('week'); }}
+          dark={dark}
+        />
+      )}
+
+      {/* Table (week view) */}
+      {viewMode === 'week' && <div style={{ border: `1px solid ${border}`, borderRadius: 14, overflow: 'auto', background: 'var(--surface)', boxShadow: 'var(--shadow-sm)' }}>
         <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 760 }}>
           <thead>
             <tr>
@@ -365,19 +531,21 @@ export function TurnosView({ workers, selectedWeek, onPrevWeek, onNextWeek, onAs
             })}
           </tbody>
         </table>
-      </div>
+      </div>}
 
-      <CoveragePanel workers={workers} days={days} dark={dark} />
+      {viewMode === 'week' && <CoveragePanel workers={workers} days={days} dark={dark} />}
 
       {/* Legend */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 18, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: text3, fontWeight: 600 }}>Franjas horarias</span>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {[...getShiftIds(), 'libre'].map((k) => (
-            <ShiftChip key={k} shiftKey={k} dark={dark} size="sm" showRange />
-          ))}
+      {viewMode === 'week' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 18, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase', color: text3, fontWeight: 600 }}>Franjas horarias</span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[...getShiftIds(), 'libre'].map((k) => (
+              <ShiftChip key={k} shiftKey={k} dark={dark} size="sm" showRange />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {active && (
         <ShiftPicker

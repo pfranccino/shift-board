@@ -2,17 +2,18 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   DAYS, ROLES, getCatIds, getCat, getShiftIds, getShift, getCoverage,
   shiftColors, statusColors, coverageSummary, weeklyHours,
-  initials, avatarBg, formatWeekRange,
+  initials, avatarBg, formatWeekRange, formatMonthYear, weekKeyToMonthYear,
+  getWeeksOfMonth,
 } from '../data';
 import { Icon } from '../components/Icon';
 import { isFirebaseConfigured, fbAuth } from '../lib/firebase';
-import { useJobStatus } from '../lib/useFirestore';
+import { useJobStatus, useMultipleJobStatus } from '../lib/useFirestore';
 import type { Worker, SolverConfig } from '../types';
 
 interface Props {
   workers: Worker[];
   selectedWeek: string;
-  onApplySchedule: (assignments: Record<string, Record<string, string>>) => void;
+  onApplySchedule: (assignments: Record<string, Record<string, string>>, weekKey?: string) => void;
   dark: boolean;
   goTab: (tab: string) => void;
   orgId?: string;
@@ -51,7 +52,9 @@ type SolverPhase =
   | { kind: 'idle' }
   | { kind: 'submitting' }
   | { kind: 'polling'; jobId: string }
+  | { kind: 'polling_month'; weekJobs: Record<string, string> } // weekKey → jobId
   | { kind: 'ready'; items: ProposalItem[] }
+  | { kind: 'ready_month'; weekResults: { weekKey: string; items: ProposalItem[] }[] }
   | { kind: 'infeasible'; reasons: InfeasibilityReason[] }
   | { kind: 'error'; message: string };
 
@@ -272,15 +275,23 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     incluirFinde: false, distribucion: 'compactar', turnoBase: 'auto',
   });
   const [solverPhase, setSolverPhase] = useState<SolverPhase>({ kind: 'idle' });
+  const [solverMode, setSolverMode] = useState<'week' | 'month'>('week');
+  const [selectedMonthYear, setSelectedMonthYear] = useState(() => weekKeyToMonthYear(selectedWeek));
   const set = <K extends keyof Rules>(k: K, v: Rules[K]) => setRules((r) => ({ ...r, [k]: v }));
 
   const scoped = rules.scope === 'Todas' ? workers : workers.filter((w) => w.cat === rules.scope);
 
-  // Firestore job polling (active only when phase is 'polling')
+  // Firestore job polling — single week
   const jobStatus = useJobStatus(
     orgId ?? '',
     solverPhase.kind === 'polling' ? solverPhase.jobId : null
   );
+
+  // Firestore job polling — month (multiple jobs)
+  const monthJobIds = solverPhase.kind === 'polling_month'
+    ? Object.values(solverPhase.weekJobs)
+    : [];
+  const monthJobStatuses = useMultipleJobStatus(orgId ?? '', monthJobIds);
 
   useEffect(() => {
     if (!jobStatus) return;
@@ -294,39 +305,92 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     }
   }, [jobStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (solverPhase.kind !== 'polling_month') return;
+    const { weekJobs } = solverPhase;
+    const weeks = Object.keys(weekJobs);
+    if (Object.keys(monthJobStatuses).length === 0) return;
+
+    const allDone = weeks.every((wk) => {
+      const js = monthJobStatuses[weekJobs[wk]];
+      return js && (js.status === 'done' || js.status === 'infeasible' || js.status === 'error');
+    });
+    if (!allDone) return;
+
+    const anyError = weeks.some((wk) => monthJobStatuses[weekJobs[wk]]?.status === 'error');
+    if (anyError) {
+      setSolverPhase({ kind: 'error', message: 'Error en uno o más solver de semana' });
+      return;
+    }
+
+    const weekResults = weeks.map((wk) => {
+      const js = monthJobStatuses[weekJobs[wk]];
+      const items = js?.status === 'done' && js.result
+        ? buildProposalFromAssignments(js.result.assignments, workers)
+        : [];
+      return { weekKey: wk, items };
+    });
+    setSolverPhase({ kind: 'ready_month', weekResults });
+  }, [monthJobStatuses]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const generate = async () => {
     if (!isFirebaseConfigured || !fbAuth?.currentUser || !orgId) {
       // Local fallback
       const p = buildProposal(scoped, rules);
       const reasons = detectInfeasibility(p, workers);
-      setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready', items: p });
+      if (solverMode === 'month') {
+        const weeks = getWeeksOfMonth(selectedMonthYear.year, selectedMonthYear.month);
+        const weekResults = reasons.length > 0
+          ? weeks.map((weekKey) => ({ weekKey, items: [] }))
+          : weeks.map((weekKey) => ({ weekKey, items: p }));
+        setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready_month', weekResults });
+      } else {
+        setSolverPhase(reasons.length > 0 ? { kind: 'infeasible', reasons } : { kind: 'ready', items: p });
+      }
       return;
     }
 
     setSolverPhase({ kind: 'submitting' });
     try {
       const token = await fbAuth.currentUser.getIdToken();
-      const res = await fetch('/api/schedule/generate', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orgId,
-          weekKey: selectedWeek,
-          workers: scoped.map((w) => ({
-            id: w.id,
-            name: w.name,
-            contracted_hours: w.contracted_hours,
-            unavailable_dates: (w as any).unavailable_dates ?? [],
-          })),
-          shifts: getShiftIds().map((id) => getShift(id)).filter((s) => s.hue !== null),
-          coverage: getCoverage(),
-          constraints: solverConfig ?? {},
-          boundary: {},
-        }),
-      });
-      if (!res.ok) throw new Error(`Error del servidor: ${res.status}`);
-      const { job_id } = await res.json();
-      setSolverPhase({ kind: 'polling', jobId: job_id });
+      const workerPayload = scoped.map((w) => ({
+        id: w.id, name: w.name,
+        contracted_hours: w.contracted_hours,
+        unavailable_dates: (w as any).unavailable_dates ?? [],
+      }));
+      const shiftsPayload = getShiftIds().map((id) => getShift(id)).filter((s) => s.hue !== null);
+      const coveragePayload = getCoverage();
+
+      if (solverMode === 'week') {
+        const res = await fetch('/api/schedule/generate', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orgId, weekKey: selectedWeek,
+            workers: workerPayload, shifts: shiftsPayload,
+            coverage: coveragePayload, constraints: solverConfig ?? {}, boundary: {},
+          }),
+        });
+        if (!res.ok) throw new Error(`Error del servidor: ${res.status}`);
+        const { job_id } = await res.json();
+        setSolverPhase({ kind: 'polling', jobId: job_id });
+      } else {
+        const weeks = getWeeksOfMonth(selectedMonthYear.year, selectedMonthYear.month);
+        const results = await Promise.all(weeks.map((weekKey) =>
+          fetch('/api/schedule/generate', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orgId, weekKey,
+              workers: workerPayload, shifts: shiftsPayload,
+              coverage: coveragePayload, constraints: solverConfig ?? {}, boundary: {},
+            }),
+          }).then((r) => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
+        ));
+        const weekJobs: Record<string, string> = {};
+        weeks.forEach((wk, i) => { weekJobs[wk] = results[i].job_id; });
+        setSolverPhase({ kind: 'polling_month', weekJobs });
+      }
     } catch (e: any) {
       setSolverPhase({ kind: 'error', message: e.message ?? 'Error al conectar con el solver' });
     }
@@ -335,10 +399,17 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
   const discard = () => setSolverPhase({ kind: 'idle' });
 
   const apply = () => {
-    if (solverPhase.kind !== 'ready') return;
-    const assignments: Record<string, Record<string, string>> = {};
-    solverPhase.items.forEach((p) => { assignments[p.worker.id] = p.newShifts; });
-    onApplySchedule(assignments);
+    if (solverPhase.kind === 'ready') {
+      const assignments: Record<string, Record<string, string>> = {};
+      solverPhase.items.forEach((p) => { assignments[p.worker.id] = p.newShifts; });
+      onApplySchedule(assignments);
+    } else if (solverPhase.kind === 'ready_month') {
+      solverPhase.weekResults.forEach(({ weekKey, items }) => {
+        const assignments: Record<string, Record<string, string>> = {};
+        items.forEach((p) => { assignments[p.worker.id] = p.newShifts; });
+        if (Object.keys(assignments).length > 0) onApplySchedule(assignments, weekKey);
+      });
+    } else return;
     setSolverPhase({ kind: 'idle' });
     goTab('turnos');
   };
@@ -371,17 +442,27 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     border: '1px solid var(--border)',
   };
 
-  const isWorking = solverPhase.kind === 'submitting' || solverPhase.kind === 'polling';
+  const isWorking = solverPhase.kind === 'submitting' || solverPhase.kind === 'polling' || solverPhase.kind === 'polling_month';
   const noWorkers = scoped.length === 0;
   const noShifts = getShiftIds().length === 0;
   const canGenerate = !isWorking && !noWorkers && !noShifts;
+
+  const prevMonth = () => setSelectedMonthYear(({ year: y, month: m }) =>
+    m === 0 ? { year: y - 1, month: 11 } : { year: y, month: m - 1 }
+  );
+  const nextMonth = () => setSelectedMonthYear(({ year: y, month: m }) =>
+    m === 11 ? { year: y + 1, month: 0 } : { year: y, month: m + 1 }
+  );
 
   return (
     <div className="view-pad">
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 22, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 23, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>Asistente de asignación</h1>
-          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>{formatWeekRange(selectedWeek)} · Define las restricciones y el sistema propone un cuadro. Puedes revisar antes de aplicar.</p>
+          <p style={{ margin: '5px 0 0', color: text3, fontSize: 13 }}>
+            {solverMode === 'week' ? formatWeekRange(selectedWeek) : formatMonthYear(selectedMonthYear.year, selectedMonthYear.month)}
+            {' · '}Define las restricciones y el sistema propone un cuadro. Puedes revisar antes de aplicar.
+          </p>
         </div>
       </div>
 
@@ -395,6 +476,30 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Período */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Período</span>
+              <Seg options={[{ key: 'week', label: 'Semana' }, { key: 'month', label: 'Mes completo' }]} value={solverMode} onChange={(v) => { setSolverMode(v as 'week' | 'month'); setSolverPhase({ kind: 'idle' }); }} wrap />
+              {solverMode === 'week' && (
+                <div style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 11.5, color: text3, textAlign: 'center' }}>
+                  {formatWeekRange(selectedWeek)}
+                </div>
+              )}
+              {solverMode === 'month' && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <button onClick={prevMonth} style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer' }}>
+                    <Icon name="chevL" size={13} />
+                  </button>
+                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 110, textAlign: 'center' }}>
+                    {formatMonthYear(selectedMonthYear.year, selectedMonthYear.month)}
+                  </span>
+                  <button onClick={nextMonth} style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-2)', cursor: 'pointer' }}>
+                    <Icon name="chevR" size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>Aplicar a</span>
               <Seg options={cats} value={rules.scope} onChange={(v) => set('scope', v)} wrap />
@@ -470,10 +575,24 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
               <div style={{ fontSize: 15, fontWeight: 600 }}>
                 {solverPhase.kind === 'submitting' ? 'Enviando al solver…' : 'Calculando horario óptimo…'}
               </div>
-              <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
-                El algoritmo está evaluando {scoped.length} trabajadores y {Object.keys(getCoverage()).length} turnos.
-                Esto puede tomar hasta 2 minutos.
-              </p>
+              {solverPhase.kind === 'polling_month' && (() => {
+                const total = Object.keys(solverPhase.weekJobs).length;
+                const done = Object.values(solverPhase.weekJobs).filter((jid) => {
+                  const s = monthJobStatuses[jid];
+                  return s && (s.status === 'done' || s.status === 'infeasible' || s.status === 'error');
+                }).length;
+                return (
+                  <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
+                    {done}/{total} semanas calculadas. Esto puede tomar varios minutos.
+                  </p>
+                );
+              })()}
+              {solverPhase.kind !== 'polling_month' && (
+                <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
+                  El algoritmo está evaluando {scoped.length} trabajadores y {Object.keys(getCoverage()).length} turnos.
+                  Esto puede tomar hasta 2 minutos.
+                </p>
+              )}
             </div>
           )}
 
@@ -628,6 +747,57 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
                   </span>
                 </div>
               )}
+            </>
+          )}
+
+          {/* Month proposal ready */}
+          {solverPhase.kind === 'ready_month' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>
+                  {formatMonthYear(selectedMonthYear.year, selectedMonthYear.month)} · {solverPhase.weekResults.length} semanas
+                </div>
+                <div style={{ display: 'flex', gap: 9 }}>
+                  <button style={btnGhost} onClick={discard}>Descartar</button>
+                  <button style={btnPrimary} onClick={apply}><Icon name="check" size={15} stroke={2.2} /> Aplicar mes al cuadro</button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {solverPhase.weekResults.map(({ weekKey, items }) => (
+                  <div key={weekKey}>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: text3, marginBottom: 6, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                      {formatWeekRange(weekKey)}
+                    </div>
+                    {items.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: text3, padding: '8px 0' }}>Sin asignaciones para esta semana.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {items.map((p) => {
+                          const sc = statusColors(p.status, dark);
+                          const sc2 = shiftColors(p.pref, dark);
+                          return (
+                            <div key={p.worker.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 10px', borderRadius: 10 }}
+                              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--surface-2)'; }}
+                              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                            >
+                              <span style={{ width: 26, height: 26, borderRadius: 6, display: 'grid', placeItems: 'center', fontSize: 9.5, fontWeight: 600, background: avatarBg(p.worker.name, dark), color: dark ? 'oklch(0.85 0.01 260)' : 'oklch(0.25 0.01 260)', flexShrink: 0 }}>{initials(p.worker.name)}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.worker.name}</div>
+                                <div style={{ fontSize: 11, color: sc2.fg, display: 'flex', alignItems: 'center', gap: 3, marginTop: 1 }}>
+                                  <span style={{ width: 5, height: 5, borderRadius: 99, background: sc2.dot }} />
+                                  {getShift(p.pref).name}
+                                </div>
+                              </div>
+                              <WeekStrip shifts={p.newShifts} dark={dark} />
+                              <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 13, fontWeight: 600, color: sc.fg, flexShrink: 0 }}>{p.hours}h</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </>
           )}
         </div>

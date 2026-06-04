@@ -339,13 +339,14 @@ export default function App() {
     }
   };
 
-  const handleApplySchedule = (assignments: Record<string, Record<DayKey, string>>) => {
+  const handleApplySchedule = (assignments: Record<string, Record<DayKey, string>>, weekKey?: string) => {
+    const wk = weekKey ?? selectedWeek;
     if (isFirebaseConfigured && org) {
-      saveWeekSchedule(org.id, selectedWeek, assignments);
+      saveWeekSchedule(org.id, wk, assignments);
     } else {
       setLocalSchedules((prev) => ({
         ...prev,
-        [selectedWeek]: { ...(prev[selectedWeek] ?? {}), ...assignments },
+        [wk]: { ...(prev[wk] ?? {}), ...assignments },
       }));
     }
   };
@@ -454,8 +455,9 @@ export default function App() {
     setSaSchedules({ [saWeek]: blank });
   };
 
-  const handleSaApply = (assignments: Record<string, Record<DayKey, string>>) => {
-    setSaSchedules((prev) => ({ ...prev, [saWeek]: { ...(prev[saWeek] ?? {}), ...assignments } }));
+  const handleSaApply = (assignments: Record<string, Record<DayKey, string>>, weekKey?: string) => {
+    const wk = weekKey ?? saWeek;
+    setSaSchedules((prev) => ({ ...prev, [wk]: { ...(prev[wk] ?? {}), ...assignments } }));
   };
 
   const saDisplayWorkers = saWorkers.map((w) => ({
@@ -741,6 +743,7 @@ export default function App() {
             <TurnosView workers={displayWorkers} selectedWeek={selectedWeek}
               onPrevWeek={() => setSelectedWeek(prevWeekKey(selectedWeek))}
               onNextWeek={() => setSelectedWeek(nextWeekKey(selectedWeek))}
+              onSelectWeek={setSelectedWeek}
               onAssign={handleAssign} dark={dark} />
           )}
           {effectiveRole === 'admin' && tab === 'asistente' && (

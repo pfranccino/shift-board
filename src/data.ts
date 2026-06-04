@@ -283,7 +283,7 @@ export function blankShifts(): Record<DayKey, string> {
   return b;
 }
 
-function weekKeyFromDate(d: Date): string {
+export function weekKeyFromDate(d: Date): string {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
@@ -340,4 +340,31 @@ export function isToday(date: Date): boolean {
   return date.getUTCFullYear() === now.getFullYear()
     && date.getUTCMonth() === now.getMonth()
     && date.getUTCDate() === now.getDate();
+}
+
+// ---- Month utilities ----
+const MONTHS_ES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+export function formatMonthYear(year: number, month: number): string {
+  return `${MONTHS_ES_FULL[month]} ${year}`;
+}
+
+export function weekKeyToMonthYear(weekKey: string): { year: number; month: number } {
+  const { jue } = getWeekDates(weekKey);
+  return { year: jue.getUTCFullYear(), month: jue.getUTCMonth() };
+}
+
+export function getMonthDays(year: number, month: number): Date[] {
+  const n = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return Array.from({ length: n }, (_, i) => new Date(Date.UTC(year, month, i + 1)));
+}
+
+export function getWeeksOfMonth(year: number, month: number): string[] {
+  const weeks: string[] = [];
+  const seen = new Set<string>();
+  getMonthDays(year, month).forEach((d) => {
+    const wk = weekKeyFromDate(d);
+    if (!seen.has(wk)) { seen.add(wk); weeks.push(wk); }
+  });
+  return weeks;
 }
