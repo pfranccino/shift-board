@@ -179,3 +179,26 @@ export function useWeekSchedule(orgId: string, weekKey: string): WeekSchedules {
 
   return schedules;
 }
+
+export function useAllOrgs() {
+  return useCollection<{ id: string; name: string; created_at?: any }>('organizations');
+}
+
+export async function bulkSaveWorkers(orgId: string, names: string[]): Promise<void> {
+  if (!fbDb) throw new Error('Firestore not initialized');
+  const days: DayKey[] = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab', 'dom'];
+  const blank = (): Record<DayKey, string> =>
+    Object.fromEntries(days.map((d) => [d, 'libre'])) as Record<DayKey, string>;
+  await Promise.all(
+    names.map((name) =>
+      addDoc(collection(fbDb!, `organizations/${orgId}/workers`), {
+        name,
+        cat: '',
+        role: 'full' as const,
+        contracted_hours: 40,
+        shifts: blank(),
+        created_at: serverTimestamp(),
+      })
+    )
+  );
+}

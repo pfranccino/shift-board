@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Icon } from '../components/Icon';
 import { hueColors, kindColors, initials, avatarBg } from '../data';
+import { useAllOrgs, useOrgWorkers, bulkSaveWorkers } from '../lib/useFirestore';
 import {
   PLATFORM_ORGS, PLATFORM_PLANS, PLATFORM_USERS, AUDIT_EVENTS, PLATFORM_SERVICES,
   SUPPORT_TICKETS, ORG_STATUS, USER_STATUS, SERVICE_STATUS,
@@ -219,139 +220,149 @@ export function SAResumen({ dark, toast }: { dark: boolean; toast: (msg: string,
 }
 
 // ─── 2. Organizaciones ──────────────────────────────────────────────────────
-export function SAOrganizaciones({ dark, toast }: { dark: boolean; toast: (msg: string, kind?: string) => void }) {
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('all');
-  const [sel, setSel] = useState<typeof PLATFORM_ORGS[0] | null>(null);
+function fmtDate(ts: any): string {
+  if (!ts) return '—';
+  try {
+    const d = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch { return '—'; }
+}
+
+function OrgDetailPanel({ orgId, dark, toast }: { orgId: string; dark: boolean; toast: (msg: string, kind?: string) => void }) {
+  const workers = useOrgWorkers(orgId);
+  const [names, setNames] = useState('');
+  const [loading, setLoading] = useState(false);
   const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
 
-  const orgs = PLATFORM_ORGS.filter((o) =>
-    (filter === 'all' || o.status === filter) &&
-    (o.name.toLowerCase().includes(q.toLowerCase()) || o.type.toLowerCase().includes(q.toLowerCase()))
-  );
+  const lineCount = names.split('\n').map((n) => n.trim()).filter(Boolean).length;
 
-  const filterOpts = [
-    { v: 'all', l: 'Todas' }, { v: 'active', l: 'Activas' },
-    { v: 'trial', l: 'Prueba' }, { v: 'suspended', l: 'Suspendidas' },
-  ];
+  const handleLoad = async () => {
+    const list = names.split('\n').map((n) => n.trim()).filter(Boolean);
+    if (!list.length) return;
+    setLoading(true);
+    try {
+      await bulkSaveWorkers(orgId, list);
+      toast(`${list.length} trabajador${list.length === 1 ? '' : 'es'} cargado${list.length === 1 ? '' : 's'}`);
+      setNames('');
+    } catch {
+      toast('Error al cargar trabajadores', 'bad');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 12 }}>
+          Trabajadores ({workers.length})
+        </div>
+        {workers.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--text-3)', margin: 0 }}>Sin trabajadores todavía.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {workers.slice(0, 8).map((w) => (
+              <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Avatar name={w.name} size={28} dark={dark} />
+                <span style={{ fontSize: 13, color: 'var(--text-1)' }}>{w.name}</span>
+              </div>
+            ))}
+            {workers.length > 8 && (
+              <div style={{ fontSize: 12, color: 'var(--text-3)', paddingLeft: 4 }}>+{workers.length - 8} más</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${border}`, paddingTop: 18 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginBottom: 4 }}>Cargar trabajadores</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginBottom: 10 }}>
+          Un nombre por línea. Se crean con turno completo (40h) sin asignación inicial.
+        </div>
+        <textarea
+          value={names}
+          onChange={(e) => setNames(e.target.value)}
+          placeholder={'Benjamin\nDiego\nCristian\nEduardo'}
+          rows={6}
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: 9,
+            border: `1px solid ${border}`, background: 'var(--surface-2)',
+            color: 'var(--text-1)', fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
+            fontSize: 13, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ marginTop: 10 }}>
+          <Btn variant="primary" icon="users" onClick={handleLoad}>
+            {loading ? 'Cargando…' : lineCount > 0 ? `Cargar ${lineCount} trabajador${lineCount === 1 ? '' : 'es'}` : 'Cargar'}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SAOrganizaciones({ dark, toast }: { dark: boolean; toast: (msg: string, kind?: string) => void }) {
+  const allOrgs = useAllOrgs();
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState<{ id: string; name: string; created_at?: any } | null>(null);
+  const border = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
+
+  const orgs = allOrgs
+    .filter((o) => o.id !== 'sa-sandbox')
+    .filter((o) => !q || o.name.toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div className="view-pad">
-      <ViewHead title="Organizaciones" sub="Clientes de la plataforma y su estado de suscripción.">
-        <Btn variant="primary" icon="plus" onClick={() => toast('Invitación de organización enviada')}>Nueva organización</Btn>
+      <ViewHead title="Organizaciones" sub="Organizaciones registradas en la plataforma.">
+        <Btn variant="primary" icon="plus" onClick={() => toast('Funcionalidad próximamente')}>Nueva organización</Btn>
       </ViewHead>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', height: 38, border: `1px solid ${border}`, borderRadius: 9, background: 'var(--surface)', color: 'var(--text-3)' }}>
           <Icon name="search" size={16} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar organización…" style={{ border: 'none', background: 'none', outline: 'none', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 13, color: 'var(--text-1)', width: 190 }} />
         </div>
-        <div style={{ display: 'inline-flex', background: 'var(--surface-2)', border: `1px solid ${border}`, borderRadius: 9, padding: 3, gap: 2 }}>
-          {filterOpts.map(({ v, l }) => {
-            const on = filter === v;
-            return (
-              <button key={v} onClick={() => setFilter(v)} style={{ padding: '6px 12px', border: 'none', borderRadius: 6, background: on ? 'var(--surface)' : 'transparent', color: on ? 'var(--text-1)' : 'var(--text-2)', boxShadow: on ? 'var(--shadow-sm)' : 'none', fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>{l}</button>
-            );
-          })}
-        </div>
       </div>
 
       <div style={{ border: `1px solid ${border}`, borderRadius: 14, overflow: 'auto', background: 'var(--surface)', boxShadow: 'var(--shadow-sm)' }}>
-        <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 720 }}>
+        <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', minWidth: 520 }}>
           <thead>
             <tr>
-              {['Organización', 'Plan', 'Estado', 'Usuarios', 'Suc.', 'Uso', 'MRR', ''].map((h, i) => (
-                <th key={i} style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--surface-2)', borderBottom: `1px solid ${border}`, fontWeight: 600, fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', height: 42, textAlign: ['Usuarios', 'Suc.', 'MRR'].includes(h) ? 'right' : 'left', padding: '0 14px', whiteSpace: 'nowrap' }}>{h}</th>
+              {['Organización', 'ID', 'Creada', ''].map((h, i) => (
+                <th key={i} style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--surface-2)', borderBottom: `1px solid ${border}`, fontWeight: 600, fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-3)', height: 42, textAlign: 'left', padding: '0 14px', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {orgs.map((o) => {
-              const plan = planById(o.plan);
-              const ss = ORG_STATUS[o.status];
-              const planHue = o.plan === 'enterprise' ? 300 : o.plan === 'pro' ? 250 : 180;
-              return (
-                <tr key={o.id} onClick={() => setSel(o)} style={{ cursor: 'pointer' }}
-                  onMouseEnter={(e) => { Array.from((e.currentTarget as HTMLTableRowElement).cells).forEach((td) => (td.style.background = 'var(--surface-2)')); }}
-                  onMouseLeave={(e) => { Array.from((e.currentTarget as HTMLTableRowElement).cells).forEach((td) => (td.style.background = '')); }}
-                >
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', fontSize: 13, verticalAlign: 'middle' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                      <Avatar name={o.name} size={34} dark={dark} />
-                      <div><div style={{ fontWeight: 500, fontSize: 13.5 }}>{o.name}</div><div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>{o.type} · {o.country}</div></div>
-                    </div>
-                  </td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', verticalAlign: 'middle' }}><Badge hue={planHue} dark={dark}>{plan.name}</Badge></td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', verticalAlign: 'middle' }}><Badge kind={ss.kind} dark={dark} dot>{ss.label}</Badge></td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', textAlign: 'right', fontFamily: '"IBM Plex Mono", monospace', fontSize: 13 }}>{o.users}</td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', textAlign: 'right', fontFamily: '"IBM Plex Mono", monospace', fontSize: 13 }}>{o.sucursales}</td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', verticalAlign: 'middle' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 130 }}>
-                      <div style={{ flex: 1 }}><Bar pct={o.usagePct} hue={o.usagePct > 85 ? 35 : 250} dark={dark} h={6} /></div>
-                      <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12, color: 'var(--text-2)', width: 34 }}>{o.usagePct}%</span>
-                    </div>
-                  </td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', textAlign: 'right', fontFamily: '"IBM Plex Mono", monospace', fontSize: 13 }}>{o.mrr ? `$${o.mrr}` : '—'}</td>
-                  <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', textAlign: 'right' }}><Icon name="chevR" size={16} style={{ color: 'var(--text-3)' }} /></td>
-                </tr>
-              );
-            })}
+            {orgs.length === 0 ? (
+              <tr>
+                <td colSpan={4} style={{ padding: '32px 14px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+                  {q ? 'No hay resultados.' : 'Sin organizaciones todavía.'}
+                </td>
+              </tr>
+            ) : orgs.map((o) => (
+              <tr key={o.id} onClick={() => setSel(o)} style={{ cursor: 'pointer' }}
+                onMouseEnter={(e) => { Array.from((e.currentTarget as HTMLTableRowElement).cells).forEach((td) => (td.style.background = 'var(--surface-2)')); }}
+                onMouseLeave={(e) => { Array.from((e.currentTarget as HTMLTableRowElement).cells).forEach((td) => (td.style.background = '')); }}
+              >
+                <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', verticalAlign: 'middle' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+                    <Avatar name={o.name} size={34} dark={dark} />
+                    <span style={{ fontWeight: 500, fontSize: 13.5 }}>{o.name}</span>
+                  </div>
+                </td>
+                <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', fontFamily: '"IBM Plex Mono", monospace', fontSize: 12, color: 'var(--text-3)', verticalAlign: 'middle' }}>{o.id}</td>
+                <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', fontSize: 13, color: 'var(--text-2)', verticalAlign: 'middle' }}>{fmtDate(o.created_at)}</td>
+                <td style={{ borderBottom: `1px solid ${border}`, padding: '11px 14px', textAlign: 'right' }}><Icon name="chevR" size={16} style={{ color: 'var(--text-3)' }} /></td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
 
       <Drawer open={!!sel} onClose={() => setSel(null)} title={sel?.name}
-        footer={sel ? <>
-          <Btn variant="ghost" onClick={() => setSel(null)}>Cerrar</Btn>
-          <Btn variant={sel.status === 'suspended' ? 'primary' : 'danger'} icon={sel.status === 'suspended' ? 'check' : 'ban'}
-            onClick={() => { toast(sel.status === 'suspended' ? 'Organización reactivada' : 'Organización suspendida', sel.status === 'suspended' ? 'ok' : 'bad'); setSel(null); }}>
-            {sel.status === 'suspended' ? 'Reactivar' : 'Suspender'}
-          </Btn>
-        </> : undefined}
+        footer={<Btn variant="ghost" onClick={() => setSel(null)}>Cerrar</Btn>}
       >
-        {sel && (() => {
-          const plan = planById(sel.plan);
-          const ss = ORG_STATUS[sel.status];
-          const border2 = dark ? 'oklch(0.32 0.01 260)' : 'oklch(0.91 0.005 250)';
-          return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Avatar name={sel.name} size={48} dark={dark} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{sel.name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{sel.type} · Cliente desde {sel.since}</div>
-                </div>
-                <Badge kind={ss.kind} dark={dark} dot>{ss.label}</Badge>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 1, background: border2, border: `1px solid ${border2}`, borderRadius: 11, overflow: 'hidden' }}>
-                {[['Plan', plan.name], ['MRR', sel.mrr ? `$${sel.mrr}` : '—'], ['Usuarios', sel.users], ['Sucursales', sel.sucursales]].map(([l, v]) => (
-                  <div key={String(l)} style={{ background: 'var(--surface)', padding: '12px 10px' }}>
-                    <div style={{ fontSize: 10.5, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>{l}</div>
-                    <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{v}</div>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 10 }}>Uso del plan</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-2)', marginBottom: 7 }}>
-                  <span>Trabajadores</span><span style={{ fontFamily: '"IBM Plex Mono", monospace' }}>{sel.users} / {plan.limits.users === Infinity ? '∞' : plan.limits.users}</span>
-                </div>
-                <Bar pct={plan.limits.users === Infinity ? 40 : (sel.users / plan.limits.users) * 100} hue={250} dark={dark} h={7} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-2)', margin: '12px 0 7px' }}>
-                  <span>Sucursales</span><span style={{ fontFamily: '"IBM Plex Mono", monospace' }}>{sel.sucursales} / {plan.limits.sucursales === Infinity ? '∞' : plan.limits.sucursales}</span>
-                </div>
-                <Bar pct={plan.limits.sucursales === Infinity ? 35 : (sel.sucursales / plan.limits.sucursales) * 100} hue={180} dark={dark} h={7} />
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 10 }}>Titular de la cuenta</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                  <Avatar name={sel.owner} size={32} dark={dark} />
-                  <div><div style={{ fontWeight: 500, fontSize: 13.5 }}>{sel.owner}</div><div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>Administrador</div></div>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+        {sel && <OrgDetailPanel orgId={sel.id} dark={dark} toast={toast} />}
       </Drawer>
     </div>
   );
