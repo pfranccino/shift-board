@@ -53,7 +53,12 @@ export function useOrgMembers(orgId: string) {
 export function useJobStatus(orgId: string, jobId: string | null) {
   const [status, setStatus] = useState<{
     status: string;
-    result: { assignments: Record<string, Record<DayKey, string>> } | null;
+    result: {
+      // New shape: one entry per ISO week of the period.
+      weeks?: Array<{ week_key: string; assignments: Record<string, Record<DayKey, string>> }>;
+      // Legacy single-week shape (kept for backward compatibility).
+      assignments?: Record<string, Record<DayKey, string>>;
+    } | null;
     infeasibility_reasons: any[] | null;
     error: string | null;
   } | null>(null);

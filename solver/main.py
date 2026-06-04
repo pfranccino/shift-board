@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from model import solve
+from model import solve, DAYS, _rest_conflict, _hsc, HOURS_SCALE
 from firestore import get_job, update_job
 
 app = FastAPI(title="ShiftBoard Solver")
@@ -13,104 +13,142 @@ class SolveRequest(BaseModel):
     org_id: str
 
 
-def _week_key_to_monday(week_key: str):
-    """Convert '2026-W23' to the Monday date of that week."""
-    from datetime import date, timedelta
+def _week_key_to_monday(week_key: str) -> date:
+    """Convert '2026-W23' to the Monday date of that ISO week."""
     year, week = week_key.split('-W')
     # ISO week: week 1 contains the first Thursday of the year
     jan4 = date(int(year), 1, 4)
     dow = jan4.isoweekday()  # 1=Mon..7=Sun
-    monday = jan4 - timedelta(days=dow - 1) + timedelta(weeks=int(week) - 1)
-    return monday
+    return jan4 - timedelta(days=dow - 1) + timedelta(weeks=int(week) - 1)
 
 
-def _resolve_unavailable(worker: dict, week_key: str) -> list[int]:
-    """Convert ISO date strings in unavailable_dates to day indices (0=Mon..6=Sun)."""
-    from datetime import date
-    monday = _week_key_to_monday(week_key)
-    unavailable = []
-    for iso_date in worker.get('unavailable_dates', []):
-        try:
-            d = date.fromisoformat(iso_date)
-            idx = (d - monday).days
-            if 0 <= idx <= 6:
-                unavailable.append(idx)
-        except ValueError:
-            pass
-    return unavailable
+def _week_keys(input_data: dict) -> list:
+    """Accept the new multi-week field, falling back to the legacy single week."""
+    keys = input_data.get('week_keys')
+    if keys:
+        return list(keys)
+    single = input_data.get('week_key')
+    return [single] if single else []
 
 
-def _build_infeasibility_reasons(payload: dict) -> list[dict]:
+def _build_days(week_keys: list) -> list:
+    """One 7-day block per ISO week, concatenated into a single period."""
+    days = []
+    for wi, _wk in enumerate(week_keys):
+        for wd in range(7):
+            days.append({'weekday': wd, 'week': wi})
+    return days
+
+
+def _resolve_unavailable(worker: dict, week_keys: list) -> list:
+    """Map ISO date strings in unavailable_dates to GLOBAL day indices."""
+    idxs = []
+    for wi, wk in enumerate(week_keys):
+        monday = _week_key_to_monday(wk)
+        for iso_date in worker.get('unavailable_dates', []):
+            try:
+                d = date.fromisoformat(iso_date)
+            except ValueError:
+                continue
+            off = (d - monday).days
+            if 0 <= off <= 6:
+                idxs.append(wi * 7 + off)
+    return idxs
+
+
+def _reshape(assignments: dict, week_keys: list) -> list:
+    """Flat {worker: {global_day: shift}} → [{week_key, assignments: {worker: {day_key: shift}}}]."""
+    weeks_out = []
+    for wi, wk in enumerate(week_keys):
+        wk_assign = {}
+        for w, row in assignments.items():
+            wk_assign[w] = {DAYS[wd]: row.get(wi * 7 + wd, 'libre') for wd in range(7)}
+        weeks_out.append({'week_key': wk, 'assignments': wk_assign})
+    return weeks_out
+
+
+def _build_infeasibility_reasons(payload: dict) -> list:
     """
-    Detect likely causes of infeasibility by relaxing coverage constraints
-    and re-solving to find which ones are violated.
+    Detect likely causes of infeasibility by relaxing coverage (adding slack)
+    and re-solving — the slack pinpoints which shift-days can't be covered, and
+    the hour deficits point at workers who can't reach their contract.
     """
-    from pulp import LpProblem, LpMinimize, LpVariable, lpSum, value, PULP_CBC_CMD, LpStatus
-    from model import DAYS, sm as _sm_unused, _end_effective, _rest_conflict
+    from ortools.sat.python import cp_model
 
     reasons = []
     workers = payload['workers']
     shifts = payload['shifts']
     coverage = payload.get('coverage', {})
     con = payload.get('constraints', {})
+    days = payload.get('days') or [{'weekday': i, 'week': 0} for i in range(7)]
 
     sm = {s['id']: s for s in shifts}
     WIDs = [w['id'] for w in workers]
     SIDs = [s['id'] for s in shifts]
-    D = list(range(7))
+    N = len(days)
+    D = list(range(N))
+    week_of = [d['week'] for d in days]
+    weeks = sorted(set(week_of))
+    days_in_week = {g: [d for d in D if week_of[d] == g] for g in weeks}
 
-    prob = LpProblem('DiagnosticRelaxed', LpMinimize)
+    m = cp_model.CpModel()
+    x = {(w, d, s): m.NewBoolVar(f'x_{w}_{d}_{s}') for w in WIDs for d in D for s in SIDs}
 
-    x = LpVariable.dicts('x', [(w, d, s) for w in WIDs for d in D for s in SIDs], cat='Binary')
-    slack = LpVariable.dicts('slack', [(s, d) for s in SIDs for d in D], lowBound=0)
-
-    for w in WIDs:
-        for d in D:
-            prob += lpSum(x[(w, d, s)] for s in SIDs) <= 1
-
+    slack = {}
     for s in SIDs:
         min_cov = coverage.get(s, 0)
         if min_cov > 0:
             for d in D:
-                prob += lpSum(x[(w, d, s)] for w in WIDs) + slack[(s, d)] >= min_cov
+                sv = m.NewIntVar(0, min_cov, f'slack_{s}_{d}')
+                slack[(s, d)] = sv
+                m.Add(sum(x[(w, d, s)] for w in WIDs) + sv >= min_cov)
+
+    for w in WIDs:
+        for d in D:
+            m.Add(sum(x[(w, d, s)] for s in SIDs) <= 1)
 
     min_rest = con.get('min_rest_hours', 11)
     for s1 in shifts:
         for s2 in shifts:
             if _rest_conflict(s1, s2, min_rest):
                 for w in WIDs:
-                    for d in range(6):
-                        prob += x[(w, d, s1['id'])] + x[(w, d + 1, s2['id'])] <= 1
+                    for d in range(N - 1):
+                        m.Add(x[(w, d, s1['id'])] + x[(w, d + 1, s2['id'])] <= 1)
 
     for w_data in workers:
         w = w_data['id']
         for d in w_data.get('unavailable_day_indices', []):
-            for s in SIDs:
-                prob += x[(w, d, s)] == 0
+            if 0 <= d < N:
+                for s in SIDs:
+                    m.Add(x[(w, d, s)] == 0)
 
     max_consec = con.get('max_consecutive_days', 6)
-    for w in WIDs:
-        for t in range(7 - max_consec):
-            prob += lpSum(lpSum(x[(w, d, s)] for s in SIDs) for d in range(t, t + max_consec + 1)) <= max_consec
+    if 0 < max_consec < N:
+        for w in WIDs:
+            for t in range(N - max_consec):
+                m.Add(sum(x[(w, d, s)] for d in range(t, t + max_consec + 1) for s in SIDs) <= max_consec)
 
-    # Mirror the real model: hours are capped at the target (never exceeded), so
-    # a coverage demand that can't be met within everyone's contracted hours shows
-    # up as coverage slack here — pointing at the true, actionable cause.
-    under = LpVariable.dicts('under', WIDs, lowBound=0)
+    max_wh = con.get('max_weekly_hours', 48)
+    under = {}
     for w_data in workers:
         w = w_data['id']
-        actual = lpSum(sm[s]['hours'] * x[(w, d, s)] for d in D for s in SIDs)
         target = w_data.get('contracted_hours', 40)
-        prob += actual <= target
-        prob += under[w] >= target - actual
+        cap_h = min(target, max_wh)
+        for g in weeks:
+            actual = sum(_hsc(sm[s]['hours']) * x[(w, d, s)] for d in days_in_week[g] for s in SIDs)
+            m.Add(actual <= _hsc(cap_h))
+            u = m.NewIntVar(0, _hsc(target), f'under_{w}_{g}')
+            m.Add(u >= _hsc(target) - actual)
+            under[(w, g)] = u
 
-    wm = {w['id']: w for w in workers}
-    prob += 1000 * lpSum(slack[(s, d)] for s in SIDs for d in D) + \
-           lpSum(100 * under[w] for w in WIDs)
+    m.Minimize(1000 * sum(slack.values()) + 100 * sum(under.values()))
 
-    prob.solve(PULP_CBC_CMD(msg=0, timeLimit=30, gapRel=0.05))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 20.0
+    solver.parameters.num_search_workers = 8
+    status = solver.Solve(m)
 
-    if LpStatus[prob.status] != 'Optimal':
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         reasons.append({
             'type': 'staff',
             'title': 'Configuración incompatible',
@@ -119,19 +157,14 @@ def _build_infeasibility_reasons(payload: dict) -> list[dict]:
         })
         return reasons
 
-    # Check coverage gaps
-    from model import DAYS as DAY_KEYS
+    # Coverage gaps aggregated per shift
     gap_by_shift = {}
-    for s in SIDs:
-        min_cov = coverage.get(s, 0)
-        if min_cov <= 0:
-            continue
-        for d in D:
-            sv = value(slack[(s, d)]) or 0
-            if sv > 0.5:
-                gap_by_shift.setdefault(s, {'days': 0, 'max_gap': 0})
-                gap_by_shift[s]['days'] += 1
-                gap_by_shift[s]['max_gap'] = max(gap_by_shift[s]['max_gap'], round(sv))
+    for (sid, _d), sv in slack.items():
+        v = solver.Value(sv)
+        if v > 0:
+            info = gap_by_shift.setdefault(sid, {'days': 0, 'max_gap': 0})
+            info['days'] += 1
+            info['max_gap'] = max(info['max_gap'], v)
 
     for sid, info in gap_by_shift.items():
         s_name = sm[sid]['name']
@@ -143,16 +176,17 @@ def _build_infeasibility_reasons(payload: dict) -> list[dict]:
                           f"habilitá fines de semana, o agregá trabajadores disponibles en ese turno.",
         })
 
-    # Check severe hour deficits
+    # Severe hour deficits (summed across the period's weeks)
     for w_data in workers:
         w = w_data['id']
-        deficit = value(under[w]) or 0
         target = w_data.get('contracted_hours', 40)
-        if deficit > target * 0.5:
+        total_target = target * len(weeks)
+        deficit = sum(solver.Value(under[(w, g)]) for g in weeks) / HOURS_SCALE
+        if total_target > 0 and deficit > total_target * 0.5:
             reasons.append({
                 'type': 'hours',
                 'title': f"{w_data['name']} — Déficit crítico de horas",
-                'detail': f"Solo se pueden asignar {round(target - deficit)}h de {target}h contratadas.",
+                'detail': f"Solo se pueden asignar {round(total_target - deficit)}h de {total_target}h en el período.",
                 'suggestion': 'Reducí los días libres mínimos, habilitá fines de semana, '
                               'o cambiá el turno base a uno de mayor duración.',
             })
@@ -172,7 +206,6 @@ def _build_infeasibility_reasons(payload: dict) -> list[dict]:
 async def solve_job(req: SolveRequest):
     org_id, job_id = req.org_id, req.job_id
 
-    # Load job from Firestore
     try:
         job = get_job(org_id, job_id)
     except ValueError as e:
@@ -182,11 +215,13 @@ async def solve_job(req: SolveRequest):
 
     try:
         input_data = job['input']
-        week_key = input_data.get('week_key', '')
+        week_keys = _week_keys(input_data)
+        if not week_keys:
+            raise ValueError('No week_keys provided')
 
-        # Convert unavailable_dates to day indices
+        input_data['days'] = _build_days(week_keys)
         for w in input_data.get('workers', []):
-            w['unavailable_day_indices'] = _resolve_unavailable(w, week_key)
+            w['unavailable_day_indices'] = _resolve_unavailable(w, week_keys)
 
         result = solve(input_data)
 
@@ -194,7 +229,7 @@ async def solve_job(req: SolveRequest):
             update_job(org_id, job_id, {
                 'status': 'done',
                 'completed_at': datetime.now(timezone.utc),
-                'result': {'assignments': result['assignments']},
+                'result': {'weeks': _reshape(result['assignments'], week_keys)},
                 'error': None,
             })
         else:

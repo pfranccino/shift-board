@@ -29,10 +29,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(e.statusCode ?? 401).json({ error: e.message });
   }
 
-  const { weekKey, workers, shifts, coverage, constraints, boundary } = req.body ?? {};
+  const { weekKey, weekKeys, workers, shifts, coverage, constraints, boundary } = req.body ?? {};
 
-  if (!weekKey || !Array.isArray(workers) || workers.length === 0) {
-    return res.status(400).json({ error: 'Se necesita al menos un trabajador para generar el horario.' });
+  // One job covers the whole period: a list of ISO weeks (or a single legacy week).
+  const weeks: string[] = Array.isArray(weekKeys) && weekKeys.length > 0
+    ? weekKeys
+    : (weekKey ? [weekKey] : []);
+
+  if (weeks.length === 0 || !Array.isArray(workers) || workers.length === 0) {
+    return res.status(400).json({ error: 'Se necesita al menos un trabajador y una semana para generar el horario.' });
   }
   if (!Array.isArray(shifts) || shifts.length === 0) {
     return res.status(400).json({ error: 'Se necesita al menos una franja horaria configurada.' });
@@ -79,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: 'pending',
       created_at: FieldValue.serverTimestamp(),
       completed_at: null,
-      input: { week_key: weekKey, workers, shifts, coverage, constraints, boundary: boundary ?? {} },
+      input: { week_keys: weeks, workers, shifts, coverage, constraints, boundary: boundary ?? {} },
       result: null,
       infeasibility_reasons: null,
       error: null,

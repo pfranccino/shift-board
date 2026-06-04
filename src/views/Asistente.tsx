@@ -7,7 +7,7 @@ import {
 } from '../data';
 import { Icon } from '../components/Icon';
 import { isFirebaseConfigured, fbAuth } from '../lib/firebase';
-import { useJobStatus, useMultipleJobStatus } from '../lib/useFirestore';
+import { useJobStatus } from '../lib/useFirestore';
 import { buildRecommendations, reachableTarget, shiftDurations, weeklyCap } from '../lib/recommend';
 import type { Recommendation } from '../lib/recommend';
 import type { Worker, SolverConfig } from '../types';
@@ -54,20 +54,19 @@ interface ProposalItem {
 type SolverPhase =
   | { kind: 'idle' }
   | { kind: 'submitting' }
-  | { kind: 'polling'; jobId: string; weekKey: string }
-  | { kind: 'polling_month'; weekJobs: Record<string, string> } // weekKey → jobId
+  | { kind: 'polling'; jobId: string; weekKeys: string[] } // one job covers the whole period
   | { kind: 'ready'; items: ProposalItem[]; weekKey: string }
   | { kind: 'ready_month'; weekResults: { weekKey: string; items: ProposalItem[] }[] }
   | { kind: 'infeasible'; reasons: InfeasibilityReason[] }
   | { kind: 'error'; message: string };
 
+interface WeekResult { week_key: string; assignments: Record<string, Record<string, string>>; }
+
 // ── Active-job persistence (survives leaving/returning to the Asistente tab) ──
 const JOB_LS_KEY = 'sb_asist_active_job';
 const JOB_TTL_MS = 6 * 60 * 60 * 1000; // 6h — don't resurrect ancient jobs
 
-type SavedJobBase =
-  | { kind: 'polling'; orgId: string; jobId: string; weekKey: string }
-  | { kind: 'polling_month'; orgId: string; weekJobs: Record<string, string> };
+type SavedJobBase = { kind: 'polling'; orgId: string; jobId: string; weekKeys: string[] };
 type SavedJob = SavedJobBase & { ts: number };
 
 function saveActiveJob(data: SavedJobBase) {
@@ -324,75 +323,52 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
 
   const scoped = rules.scope === 'Todas' ? workers : workers.filter((w) => w.cat === rules.scope);
 
-  // Firestore job polling — single week
+  // Firestore job polling — a single job now covers the whole period (week or month)
   const jobStatus = useJobStatus(
     orgId ?? '',
     solverPhase.kind === 'polling' ? solverPhase.jobId : null
   );
 
-  // Firestore job polling — month (multiple jobs)
-  const monthJobIds = solverPhase.kind === 'polling_month'
-    ? Object.values(solverPhase.weekJobs)
-    : [];
-  const monthJobStatuses = useMultipleJobStatus(orgId ?? '', monthJobIds);
-
   // Restore an in-flight (or just-finished) job when returning to this tab.
   // The component unmounts on tab change and loses its state, but the job keeps
-  // running on the backend — re-subscribe via the persisted job id(s).
+  // running on the backend — re-subscribe via the persisted job id.
   useEffect(() => {
     if (!orgId || solverPhase.kind !== 'idle') return;
     const saved = loadActiveJob(orgId);
-    if (!saved) return;
-    if (saved.kind === 'polling') {
-      setSolverPhase({ kind: 'polling', jobId: saved.jobId, weekKey: saved.weekKey });
-    } else if (saved.kind === 'polling_month') {
-      setSolverPhase({ kind: 'polling_month', weekJobs: saved.weekJobs });
-    }
+    if (saved) setSolverPhase({ kind: 'polling', jobId: saved.jobId, weekKeys: saved.weekKeys });
   }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!jobStatus) return;
     if (jobStatus.status === 'done' && jobStatus.result) {
-      const assignments = jobStatus.result.assignments;
-      setSolverPhase((prev) => ({
-        kind: 'ready',
-        items: buildProposalFromAssignments(assignments, workers, solverConfig),
-        weekKey: prev.kind === 'polling' ? prev.weekKey : selectedWeek,
-      }));
+      // New shape: result.weeks = [{ week_key, assignments }]. Fall back to the
+      // legacy single-week shape just in case an old job doc is read.
+      const weeks: WeekResult[] = jobStatus.result.weeks
+        ?? (jobStatus.result.assignments
+          ? [{ week_key: selectedWeek, assignments: jobStatus.result.assignments }]
+          : []);
+      if (weeks.length <= 1) {
+        const wk = weeks[0];
+        setSolverPhase({
+          kind: 'ready',
+          items: buildProposalFromAssignments(wk?.assignments ?? {}, workers, solverConfig),
+          weekKey: wk?.week_key ?? selectedWeek,
+        });
+      } else {
+        setSolverPhase({
+          kind: 'ready_month',
+          weekResults: weeks.map((w) => ({
+            weekKey: w.week_key,
+            items: buildProposalFromAssignments(w.assignments, workers, solverConfig),
+          })),
+        });
+      }
     } else if (jobStatus.status === 'infeasible') {
       setSolverPhase({ kind: 'infeasible', reasons: jobStatus.infeasibility_reasons ?? [] });
     } else if (jobStatus.status === 'error') {
       setSolverPhase({ kind: 'error', message: jobStatus.error ?? 'Error desconocido' });
     }
   }, [jobStatus]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (solverPhase.kind !== 'polling_month') return;
-    const { weekJobs } = solverPhase;
-    const weeks = Object.keys(weekJobs);
-    if (Object.keys(monthJobStatuses).length === 0) return;
-
-    const allDone = weeks.every((wk) => {
-      const js = monthJobStatuses[weekJobs[wk]];
-      return js && (js.status === 'done' || js.status === 'infeasible' || js.status === 'error');
-    });
-    if (!allDone) return;
-
-    const anyError = weeks.some((wk) => monthJobStatuses[weekJobs[wk]]?.status === 'error');
-    if (anyError) {
-      setSolverPhase({ kind: 'error', message: 'Error en uno o más solver de semana' });
-      return;
-    }
-
-    const weekResults = weeks.map((wk) => {
-      const js = monthJobStatuses[weekJobs[wk]];
-      const items = js?.status === 'done' && js.result
-        ? buildProposalFromAssignments(js.result.assignments, workers, solverConfig)
-        : [];
-      return { weekKey: wk, items };
-    });
-    setSolverPhase({ kind: 'ready_month', weekResults });
-  }, [monthJobStatuses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generate = async () => {
     // Recommendations are pure arithmetic — compute on every generate, both modes.
@@ -426,38 +402,24 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
       const shiftsPayload = getShiftIds().map((id) => getShift(id)).filter((s) => s.hue !== null);
       const coveragePayload = getCoverage();
 
-      if (solverMode === 'week') {
-        const res = await fetch('/api/schedule/generate', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orgId, weekKey: selectedWeek,
-            workers: workerPayload, shifts: shiftsPayload,
-            coverage: coveragePayload, constraints: solverConfig ?? {}, boundary: {},
-          }),
-        });
-        if (!res.ok) throw new Error(`Error del servidor: ${res.status}`);
-        const { job_id } = await res.json();
-        saveActiveJob({ kind: 'polling', orgId, jobId: job_id, weekKey: selectedWeek });
-        setSolverPhase({ kind: 'polling', jobId: job_id, weekKey: selectedWeek });
-      } else {
-        const weeks = getWeeksOfMonth(selectedMonthYear.year, selectedMonthYear.month);
-        const results = await Promise.all(weeks.map((weekKey) =>
-          fetch('/api/schedule/generate', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orgId, weekKey,
-              workers: workerPayload, shifts: shiftsPayload,
-              coverage: coveragePayload, constraints: solverConfig ?? {}, boundary: {},
-            }),
-          }).then((r) => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
-        ));
-        const weekJobs: Record<string, string> = {};
-        weeks.forEach((wk, i) => { weekJobs[wk] = results[i].job_id; });
-        saveActiveJob({ kind: 'polling_month', orgId, weekJobs });
-        setSolverPhase({ kind: 'polling_month', weekJobs });
-      }
+      // One job covers the whole period; the solver keeps continuity across weeks.
+      const weekKeys = solverMode === 'week'
+        ? [selectedWeek]
+        : getWeeksOfMonth(selectedMonthYear.year, selectedMonthYear.month);
+
+      const res = await fetch('/api/schedule/generate', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgId, weekKeys,
+          workers: workerPayload, shifts: shiftsPayload,
+          coverage: coveragePayload, constraints: solverConfig ?? {}, boundary: {},
+        }),
+      });
+      if (!res.ok) throw new Error(`Error del servidor: ${res.status}`);
+      const { job_id } = await res.json();
+      saveActiveJob({ kind: 'polling', orgId, jobId: job_id, weekKeys });
+      setSolverPhase({ kind: 'polling', jobId: job_id, weekKeys });
     } catch (e: any) {
       setSolverPhase({ kind: 'error', message: e.message ?? 'Error al conectar con el solver' });
     }
@@ -511,7 +473,7 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
     border: '1px solid var(--border)',
   };
 
-  const isWorking = solverPhase.kind === 'submitting' || solverPhase.kind === 'polling' || solverPhase.kind === 'polling_month';
+  const isWorking = solverPhase.kind === 'submitting' || solverPhase.kind === 'polling';
   const noWorkers = scoped.length === 0;
   const noShifts = getShiftIds().length === 0;
   const canGenerate = !isWorking && !noWorkers && !noShifts;
@@ -668,24 +630,11 @@ export function AsistenteView({ workers, selectedWeek, onApplySchedule, dark, go
               <div style={{ fontSize: 15, fontWeight: 600 }}>
                 {solverPhase.kind === 'submitting' ? 'Enviando al solver…' : 'Calculando horario óptimo…'}
               </div>
-              {solverPhase.kind === 'polling_month' && (() => {
-                const total = Object.keys(solverPhase.weekJobs).length;
-                const done = Object.values(solverPhase.weekJobs).filter((jid) => {
-                  const s = monthJobStatuses[jid];
-                  return s && (s.status === 'done' || s.status === 'infeasible' || s.status === 'error');
-                }).length;
-                return (
-                  <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
-                    {done}/{total} semanas calculadas. Esto puede tomar varios minutos.
-                  </p>
-                );
-              })()}
-              {solverPhase.kind !== 'polling_month' && (
-                <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
-                  El algoritmo está evaluando {scoped.length} trabajadores y {Object.keys(getCoverage()).length} turnos.
-                  Esto puede tomar hasta 2 minutos.
-                </p>
-              )}
+              <p style={{ fontSize: 13, color: text3, maxWidth: 320, textAlign: 'center', lineHeight: 1.5, margin: 0 }}>
+                {solverPhase.kind === 'polling' && solverPhase.weekKeys.length > 1
+                  ? `Resolviendo ${solverPhase.weekKeys.length} semanas en un solo cálculo, con continuidad entre semanas. Puede tomar hasta ~1 minuto.`
+                  : `El algoritmo está evaluando ${scoped.length} trabajadores y ${Object.keys(getCoverage()).length} turnos.`}
+              </p>
             </div>
           )}
 
