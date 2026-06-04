@@ -40,15 +40,17 @@ export function WaitingView({ user, dark, onLogout }: Props) {
           display: 'grid', placeItems: 'center',
           margin: '0 auto 20px', color: text3,
         }}>
-          <Icon name="mail" size={26} stroke={1.4} />
+          <Icon name="building" size={26} stroke={1.4} />
         </div>
 
         <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.025em', margin: '0 0 8px' }}>
-          Cuenta lista
+          Sin organización asignada
         </h1>
-        <p style={{ fontSize: 13.5, color: text3, margin: '0 0 24px', lineHeight: 1.6 }}>
-          Tu cuenta <strong style={{ color: 'var(--text-1)' }}>{user.email}</strong> está registrada.<br />
-          El administrador te enviará un enlace de invitación para unirte a tu organización.
+        <p style={{ fontSize: 13.5, color: text3, margin: '0 0 8px', lineHeight: 1.6 }}>
+          Tu cuenta <strong style={{ color: 'var(--text-1)' }}>{user.email}</strong> no está asociada a ninguna organización.
+        </p>
+        <p style={{ fontSize: 12.5, color: text3, margin: '0 0 28px', lineHeight: 1.6 }}>
+          Si querés crear tu propia organización, cerrá sesión y usá <strong style={{ color: 'var(--text-1)' }}>Crear cuenta</strong>.
         </p>
 
         <button onClick={onLogout} style={{

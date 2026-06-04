@@ -32,10 +32,9 @@ service cloud.firestore {
     match /memberships/{membershipId} {
       allow read: if request.auth != null && (
         resource.data.userId == request.auth.uid ||
+        isSuperAdmin() ||
         isOwnerOrAdmin(resource.data.orgId)
       );
-      // Superadmins can create any membership.
-      // Regular users can create their own (invitation acceptance).
       allow create: if request.auth != null && (
         isSuperAdmin() ||
         request.resource.data.userId == request.auth.uid
@@ -48,7 +47,7 @@ service cloud.firestore {
     // ── Invitations ───────────────────────────────────────────────────────
 
     match /invitations/{token} {
-      allow read: if true; // Public so invited users can fetch by token
+      allow read: if true;
       allow create: if request.auth != null && (
         isSuperAdmin() || isOwnerOrAdmin(request.resource.data.orgId)
       );
@@ -61,20 +60,19 @@ service cloud.firestore {
     // ── Organizations ─────────────────────────────────────────────────────
 
     match /organizations/{orgId} {
-      // Only superadmins can create new organizations
-      allow create: if request.auth != null && isSuperAdmin();
-      allow read, update, delete: if request.auth != null && isMember(orgId);
+      // Any authenticated user can create their own org (signup flow)
+      allow create: if request.auth != null;
+      allow read, update, delete: if request.auth != null && (isSuperAdmin() || isMember(orgId));
 
       // Workers
       match /workers/{workerId} {
-        allow read: if request.auth != null && isMember(orgId);
-        allow write: if request.auth != null && isMember(orgId);
+        allow read: if request.auth != null && (isSuperAdmin() || isMember(orgId));
+        allow write: if request.auth != null && (isSuperAdmin() || isMember(orgId));
       }
 
       // Members sub-collection
       match /members/{memberId} {
-        allow read: if request.auth != null && isMember(orgId);
-        // Superadmins or the user creating their own member doc (invitation acceptance)
+        allow read: if request.auth != null && (isSuperAdmin() || isMember(orgId));
         allow create: if request.auth != null && (
           isSuperAdmin() || memberId == request.auth.uid
         );
@@ -85,19 +83,19 @@ service cloud.firestore {
 
       // Config
       match /config/{configId} {
-        allow read: if request.auth != null && isMember(orgId);
-        allow write: if request.auth != null && isOwnerOrAdmin(orgId);
+        allow read: if request.auth != null && (isSuperAdmin() || isMember(orgId));
+        allow write: if request.auth != null && (isSuperAdmin() || isOwnerOrAdmin(orgId));
       }
 
       // Schedules
       match /schedules/{weekKey}/assignments/{workerId} {
-        allow read: if request.auth != null && isMember(orgId);
-        allow write: if request.auth != null && isMember(orgId);
+        allow read: if request.auth != null && (isSuperAdmin() || isMember(orgId));
+        allow write: if request.auth != null && (isSuperAdmin() || isMember(orgId));
       }
 
       // Solver jobs — members can read, only server SDK writes
       match /jobs/{jobId} {
-        allow read: if request.auth != null && isMember(orgId);
+        allow read: if request.auth != null && (isSuperAdmin() || isMember(orgId));
         allow create: if false;
         allow update: if false;
       }
